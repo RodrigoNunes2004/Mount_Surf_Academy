@@ -1,0 +1,197 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Business {
+  id          String      @id @default(cuid())
+  name        String
+  location    String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  users       User[]
+  customers   Customer[]
+  instructors Instructor[]
+  equipment   Equipment[]
+  lessons     Lesson[]
+  bookings    Booking[]
+  rentals     Rental[]
+  payments    Payment[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  business     Business  @relation(fields: [businessId], references: [id])
+  businessId   String
+
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         UserRole  @default(STAFF)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+enum UserRole {
+  OWNER
+  STAFF
+}
+
+model Customer {
+  id         String    @id @default(cuid())
+  business   Business  @relation(fields: [businessId], references: [id])
+  businessId String
+
+  firstName  String
+  lastName   String
+  phone      String?
+  email      String?
+  dob        DateTime?
+  notes      String?
+
+  bookings   Booking[]
+  rentals    Rental[]
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model Instructor {
+  id         String    @id @default(cuid())
+  business   Business  @relation(fields: [businessId], references: [id])
+  businessId String
+
+  firstName  String
+  lastName   String
+  phone      String?
+  email      String?
+
+  lessons    Lesson[]
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model Equipment {
+  id          String    @id @default(cuid())
+  business    Business  @relation(fields: [businessId], references: [id])
+  businessId  String
+
+  category    String
+  size        String?
+  description String?
+  hourlyPrice Decimal   @db.Decimal(10,2)
+  status      EquipmentStatus @default(AVAILABLE)
+
+  rentals     Rental[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+enum EquipmentStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+}
+
+model Lesson {
+  id          String    @id @default(cuid())
+  business    Business  @relation(fields: [businessId], references: [id])
+  businessId  String
+
+  instructor  Instructor? @relation(fields: [instructorId], references: [id])
+  instructorId String?
+
+  title       String
+  price       Decimal   @db.Decimal(10,2)
+  capacity    Int?
+
+  bookings    Booking[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Booking {
+  id          String    @id @default(cuid())
+  business    Business  @relation(fields: [businessId], references: [id])
+  businessId  String
+
+  customer    Customer  @relation(fields: [customerId], references: [id])
+  customerId  String
+
+  lesson      Lesson?   @relation(fields: [lessonId], references: [id])
+  lessonId    String?
+
+  startAt     DateTime
+  endAt       DateTime
+  status      BookingStatus @default(BOOKED)
+
+  payments    Payment[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+enum BookingStatus {
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
+
+model Rental {
+  id          String    @id @default(cuid())
+  business    Business  @relation(fields: [businessId], references: [id])
+  businessId  String
+
+  customer    Customer  @relation(fields: [customerId], references: [id])
+  customerId  String
+
+  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+  equipmentId String
+
+  startAt     DateTime
+  endAt       DateTime
+  status      RentalStatus @default(ACTIVE)
+
+  payments    Payment[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+enum RentalStatus {
+  ACTIVE
+  RETURNED
+  OVERDUE
+}
+
+model Payment {
+  id          String    @id @default(cuid())
+  business    Business  @relation(fields: [businessId], references: [id])
+  businessId  String
+
+  booking     Booking?  @relation(fields: [bookingId], references: [id])
+  bookingId   String?
+
+  rental      Rental?   @relation(fields: [rentalId], references: [id])
+  rentalId    String?
+
+  amount      Decimal   @db.Decimal(10,2)
+  method      PaymentMethod
+  stripeId    String?
+
+  createdAt   DateTime  @default(now())
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+}
