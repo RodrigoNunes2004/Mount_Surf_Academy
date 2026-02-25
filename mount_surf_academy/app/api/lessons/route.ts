@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../_lib/tenant";
 
 export async function GET(req: NextRequest) {
-  const businessId = resolveBusinessId(req);
+  const businessId = await resolveBusinessId(req);
   if (!businessId) {
     return NextResponse.json(
       { error: "Missing tenant. Provide x-business-id header." },
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const businessId = resolveBusinessId(req);
+  const businessId = await resolveBusinessId(req);
   if (!businessId) {
     return NextResponse.json(
       { error: "Missing tenant. Provide x-business-id header." },

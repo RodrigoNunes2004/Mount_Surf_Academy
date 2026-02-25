@@ -7,7 +7,7 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const businessId = resolveBusinessId(req);
+  const businessId = await resolveBusinessId(req);
   if (!businessId) {
     return NextResponse.json(
       { error: "Missing tenant. Provide x-business-id header." },
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const businessId = resolveBusinessId(req);
+  const businessId = await resolveBusinessId(req);
   if (!businessId) {
     return NextResponse.json(
       { error: "Missing tenant. Provide x-business-id header." },
@@ -109,7 +109,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const businessId = resolveBusinessId(req);
+  const businessId = await resolveBusinessId(req);
   if (!businessId) {
     return NextResponse.json(
       { error: "Missing tenant. Provide x-business-id header." },
