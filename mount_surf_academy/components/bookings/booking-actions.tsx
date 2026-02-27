@@ -95,3 +95,43 @@ export function CompleteBookingButton({ bookingId }: { bookingId: string }) {
   );
 }
 
+export function NoShowBookingButton({ bookingId }: { bookingId: string }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  async function markNoShow() {
+    setLoading(true);
+    await fetch(`/api/bookings/${bookingId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "NO_SHOW" }),
+    });
+    setLoading(false);
+    router.refresh();
+  }
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="sm" disabled={loading}>
+          No-show
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Mark no-show?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Customer did not attend. This keeps booking history for reporting.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={loading}>Back</AlertDialogCancel>
+          <AlertDialogAction onClick={markNoShow} disabled={loading}>
+            {loading ? "Saving..." : "Mark no-show"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+

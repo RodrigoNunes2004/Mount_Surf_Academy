@@ -17,6 +17,7 @@ model Business {
   customers   Customer[]
   instructors Instructor[]
   equipment   Equipment[]
+  equipmentCategories EquipmentCategory[]
   lessons     Lesson[]
   bookings    Booking[]
   rentals     Rental[]
@@ -130,6 +131,7 @@ model Booking {
 
   lesson      Lesson?   @relation(fields: [lessonId], references: [id])
   lessonId    String?
+  rental      Rental?
 
   startAt     DateTime
   endAt       DateTime
@@ -144,8 +146,27 @@ model Booking {
 
 enum BookingStatus {
   BOOKED
+  CHECKED_IN
   COMPLETED
   CANCELLED
+  NO_SHOW
+}
+
+model EquipmentCategory {
+  id            String    @id @default(cuid())
+  business      Business  @relation(fields: [businessId], references: [id])
+  businessId    String
+
+  name          String
+  totalQuantity Int       @default(0)
+  hourlyRate    Decimal?  @db.Decimal(10,2)
+
+  rentals       Rental[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([businessId, name])
 }
 
 model Rental {
@@ -156,11 +177,19 @@ model Rental {
   customer    Customer  @relation(fields: [customerId], references: [id])
   customerId  String
 
-  equipment   Equipment @relation(fields: [equipmentId], references: [id])
-  equipmentId String
+  booking     Booking?  @relation(fields: [bookingId], references: [id])
+  bookingId   String?   @unique
+
+  equipmentCategory   EquipmentCategory? @relation(fields: [equipmentCategoryId], references: [id])
+  equipmentCategoryId String?
+  quantity            Int @default(1)
+
+  equipment   Equipment? @relation(fields: [equipmentId], references: [id])
+  equipmentId String?
 
   startAt     DateTime
   endAt       DateTime
+  returnedAt  DateTime?
   status      RentalStatus @default(ACTIVE)
 
   payments    Payment[]

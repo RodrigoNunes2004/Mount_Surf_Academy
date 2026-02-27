@@ -12,7 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CreateLessonBookingDialog } from "@/components/bookings/create-lesson-booking-dialog";
-import { CancelBookingButton, CompleteBookingButton } from "@/components/bookings/booking-actions";
+import { CancelBookingButton, CompleteBookingButton, NoShowBookingButton } from "@/components/bookings/booking-actions";
+import { CheckInBookingDialog } from "@/components/bookings/check-in-booking-dialog";
 
 type SearchParams = {
   status?: string;
@@ -21,6 +22,10 @@ type SearchParams = {
 function statusBadge(status: BookingStatus) {
   if (status === BookingStatus.CANCELLED)
     return <Badge variant="secondary">Cancelled</Badge>;
+  if (status === BookingStatus.NO_SHOW)
+    return <Badge variant="secondary">No-show</Badge>;
+  if (status === BookingStatus.CHECKED_IN)
+    return <Badge variant="secondary">Checked in</Badge>;
   if (status === BookingStatus.COMPLETED)
     return <Badge variant="secondary">Completed</Badge>;
   return <Badge>Booked</Badge>;
@@ -42,10 +47,10 @@ export default async function BookingsPage({
       : statusRaw === "cancelled"
         ? [BookingStatus.CANCELLED]
         : statusRaw === "history"
-          ? [BookingStatus.COMPLETED, BookingStatus.CANCELLED]
-          : [BookingStatus.BOOKED];
+          ? [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.NO_SHOW]
+          : [BookingStatus.BOOKED, BookingStatus.CHECKED_IN];
 
-  const [customers, lessons, bookings] = await Promise.all([
+  const [customers, lessons, categories, bookings] = await Promise.all([
     prisma.customer.findMany({
       where: { businessId, archivedAt: null } as never,
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -58,6 +63,12 @@ export default async function BookingsPage({
       take: 200,
       select: { id: true, title: true, durationMinutes: true, capacity: true },
     }),
+    prisma.equipmentCategory.findMany({
+      where: { businessId },
+      orderBy: { name: "asc" },
+      take: 200,
+      select: { id: true, name: true, totalQuantity: true },
+    }),
     prisma.booking.findMany({
       where: { businessId, status: { in: statusFilter } },
       orderBy: { startAt: "desc" },
@@ -65,6 +76,7 @@ export default async function BookingsPage({
       include: {
         customer: { select: { firstName: true, lastName: true } },
         lesson: { select: { title: true, durationMinutes: true } },
+        rental: { select: { id: true } },
       },
     }),
   ]);
@@ -117,8 +129,9 @@ export default async function BookingsPage({
               </TableHeader>
               <TableBody>
                 {bookings.map((b) => {
-                  const canMutate =
-                    b.status === BookingStatus.BOOKED && b.startAt > now;
+                  const canCancel = b.status === BookingStatus.BOOKED && b.startAt > now;
+                  const canCheckIn = b.status === BookingStatus.BOOKED && !b.rental;
+                  const canComplete = b.status === BookingStatus.CHECKED_IN;
                   return (
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">
@@ -136,10 +149,23 @@ export default async function BookingsPage({
                       <TableCell>{statusBadge(b.status)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <CompleteBookingButton bookingId={b.id} />
-                          <CancelBookingButton bookingId={b.id} />
+                          {canCheckIn ? (
+                            <CheckInBookingDialog
+                              bookingId={b.id}
+                              defaultQuantity={b.participants}
+                              categories={categories}
+                            />
+                          ) : null}
+                          {canComplete ? (
+                            <CompleteBookingButton bookingId={b.id} />
+                          ) : null}
+                          {canCancel ? (
+                            <>
+                              <CancelBookingButton bookingId={b.id} />
+                              <NoShowBookingButton bookingId={b.id} />
+                            </>
+                          ) : null}
                         </div>
-                        {!canMutate ? null : null}
                       </TableCell>
                     </TableRow>
                   );

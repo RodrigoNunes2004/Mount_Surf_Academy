@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../_lib/tenant";
 
 const BOOKING_STATUSES = Object.values(BookingStatus);
+const ACTIVE_LESSON_BOOKING_STATUSES = [BookingStatus.BOOKED, BookingStatus.CHECKED_IN].filter(
+  Boolean,
+) as BookingStatus[];
 
 export async function GET(req: NextRequest) {
   const businessId = await resolveBusinessId(req);
@@ -105,6 +108,13 @@ export async function POST(req: NextRequest) {
       ? (statusRaw as BookingStatus)
       : undefined;
 
+  if (status && status !== BookingStatus.BOOKED) {
+    return NextResponse.json(
+      { error: "Bookings must be created with status BOOKED." },
+      { status: 400 },
+    );
+  }
+
   if (!customerId) {
     return NextResponse.json({ error: "customerId is required." }, { status: 400 });
   }
@@ -156,17 +166,34 @@ export async function POST(req: NextRequest) {
 
     const mins = durationMinutes ?? lesson.durationMinutes ?? 60;
     const computedEndAt = new Date(startAt.getTime() + mins * 60_000);
-    if (!endAt) {
-      // use computed
-      // eslint-disable-next-line no-param-reassign
-      (b as Record<string, unknown>).endAt = computedEndAt;
-    } else if (Number.isNaN(endAt.getTime())) {
+    const finalEnd = endAt ?? computedEndAt;
+    if (Number.isNaN(finalEnd.getTime())) {
       return NextResponse.json({ error: "endAt must be a valid date." }, { status: 400 });
     }
-
-    const finalEnd = (b.endAt as Date) ?? computedEndAt;
     if (finalEnd <= startAt) {
       return NextResponse.json({ error: "endAt must be after startAt." }, { status: 400 });
+    }
+
+    // Prevent overbooking based on lesson capacity.
+    if (lesson.capacity !== null && lesson.capacity !== undefined) {
+      const overlap = await prisma.booking.aggregate({
+        where: {
+          businessId,
+          lessonId,
+          status: { in: ACTIVE_LESSON_BOOKING_STATUSES },
+          startAt: { lt: finalEnd },
+          endAt: { gt: startAt },
+        },
+        _sum: { participants: true },
+      });
+
+      const alreadyBooked = overlap._sum.participants ?? 0;
+      if (alreadyBooked + participants > lesson.capacity) {
+        return NextResponse.json(
+          { error: "Lesson is fully booked for this time slot." },
+          { status: 409 },
+        );
+      }
     }
 
     const booking = await prisma.booking.create({

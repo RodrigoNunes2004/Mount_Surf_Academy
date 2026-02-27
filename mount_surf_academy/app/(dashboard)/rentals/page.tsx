@@ -34,6 +34,26 @@ function statusBadge(status: RentalStatusLike) {
   return <Badge>Active</Badge>;
 }
 
+type RentalRow = {
+  id: string;
+  customerId: string;
+  equipmentId: string | null;
+  equipmentCategoryId: string | null;
+  quantity: number;
+  startAt: Date;
+  endAt: Date;
+  status: PrismaRentalStatus;
+};
+
+type CustomerMini = { id: string; firstName: string; lastName: string };
+type EquipmentMini = { id: string; category: string; size: string | null };
+type CategoryMini = { id: string; name: string };
+
+type PrismaHack = typeof prisma & {
+  rental: { findMany: (args: unknown) => Promise<RentalRow[]> };
+  equipmentCategory: { findMany: (args: unknown) => Promise<CategoryMini[]> };
+};
+
 export default async function RentalsPage({
   searchParams,
 }: {
@@ -41,6 +61,7 @@ export default async function RentalsPage({
 }) {
   const session = await requireSession();
   const businessId = session.user.businessId;
+  const prismaHack = prisma as unknown as PrismaHack;
 
   const sp = await searchParams;
   const statusRaw = (sp.status ?? "active").toLowerCase();
@@ -81,19 +102,63 @@ export default async function RentalsPage({
       take: 200,
       select: { id: true, category: true, size: true, description: true },
     }),
-    prisma.rental.findMany({
-      where: {
-        businessId,
-        status: { in: statusFilter },
-      },
+    // Cast is intentional to avoid stale editor Prisma types.
+    // Runtime and Next build use the generated client correctly.
+    prismaHack.rental.findMany({
+      where: { businessId, status: { in: statusFilter } },
       orderBy: { startAt: "desc" },
       take: 50,
-      include: {
-        customer: { select: { firstName: true, lastName: true } },
-        equipment: { select: { category: true, size: true } },
+      select: {
+        id: true,
+        customerId: true,
+        equipmentId: true,
+        equipmentCategoryId: true,
+        quantity: true,
+        startAt: true,
+        endAt: true,
+        status: true,
       },
-    }),
+    }) as Promise<RentalRow[]>,
   ]);
+
+  const customerIds = Array.from(new Set(rentals.map((r) => r.customerId)));
+  const equipmentIds = Array.from(
+    new Set(rentals.map((r) => r.equipmentId).filter(Boolean) as string[]),
+  );
+  const categoryIds = Array.from(
+    new Set(
+      rentals.map((r) => r.equipmentCategoryId).filter(Boolean) as string[],
+    ),
+  );
+
+  const [rentalCustomers, rentalEquipment, rentalCategories] = await Promise.all([
+    prisma.customer.findMany({
+      where: { businessId, id: { in: customerIds } },
+      select: { id: true, firstName: true, lastName: true },
+    }),
+    equipmentIds.length
+      ? prisma.equipment.findMany({
+          where: { businessId, id: { in: equipmentIds } },
+          select: { id: true, category: true, size: true },
+        })
+      : Promise.resolve([]),
+    categoryIds.length
+      ? prismaHack.equipmentCategory.findMany({
+          where: { businessId, id: { in: categoryIds } },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const customerById = new Map<string, CustomerMini>(
+    (rentalCustomers as CustomerMini[]).map((c) => [c.id, c]),
+  );
+  const equipmentById = new Map<string, EquipmentMini>(
+    (rentalEquipment as EquipmentMini[]).map((e) => [e.id, e]),
+  );
+  const categoryById = new Map<string, CategoryMini>(
+    (rentalCategories as CategoryMini[]).map((c) => [c.id, c]),
+  );
 
   const now = new Date();
 
@@ -148,14 +213,21 @@ export default async function RentalsPage({
                     r.status === RENTAL_STATUS.ACTIVE ||
                     r.status === RENTAL_STATUS.OVERDUE;
 
+                  const c = customerById.get(r.customerId);
+                  const eq = r.equipmentId ? equipmentById.get(r.equipmentId) : null;
+                  const cat = r.equipmentCategoryId
+                    ? categoryById.get(r.equipmentCategoryId)
+                    : null;
+
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">
-                        {r.customer.firstName} {r.customer.lastName}
+                        {c ? `${c.firstName} ${c.lastName}` : "—"}
                       </TableCell>
                       <TableCell>
-                        {r.equipment.category}
-                        {r.equipment.size ? ` • ${r.equipment.size}` : ""}
+                        {cat?.name ?? eq?.category ?? "—"}
+                        {eq?.size ? ` • ${eq.size}` : ""}
+                        {typeof r.quantity === "number" ? ` • x${r.quantity}` : ""}
                       </TableCell>
                       <TableCell>{new Date(r.startAt).toLocaleString()}</TableCell>
                       <TableCell>{new Date(r.endAt).toLocaleString()}</TableCell>

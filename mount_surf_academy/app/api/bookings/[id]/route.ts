@@ -1,14 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, RentalStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../../_lib/tenant";
 
 const BOOKING_STATUSES = Object.values(BookingStatus);
-const MUTABLE_STATUSES = new Set<BookingStatus>([
-  BookingStatus.BOOKED,
-  BookingStatus.CANCELLED,
-  BookingStatus.COMPLETED,
-]);
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -59,7 +54,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const current = await prisma.booking.findFirst({
     where: { id, businessId },
-    select: { id: true, status: true, startAt: true, endAt: true },
+    select: {
+      id: true,
+      status: true,
+      startAt: true,
+      endAt: true,
+      customerId: true,
+      participants: true,
+      rental: { select: { id: true } },
+    },
   });
   if (!current) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
@@ -164,28 +167,141 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       );
     }
     const next = s as BookingStatus;
-    if (!MUTABLE_STATUSES.has(next)) {
-      return NextResponse.json({ error: "Invalid status." }, { status: 400 });
-    }
-    if (next !== current.status) {
-      // allowed transitions: BOOKED -> CANCELLED|COMPLETED
+
+    // Engine transitions:
+    // BOOKED -> CHECKED_IN | CANCELLED | NO_SHOW
+    // CHECKED_IN -> COMPLETED
+    if (next === BookingStatus.CHECKED_IN) {
       if (current.status !== BookingStatus.BOOKED) {
         return NextResponse.json(
-          { error: "Only booked bookings can change status." },
+          { error: "Only booked bookings can be checked in." },
           { status: 400 },
         );
       }
-      if (
-        next !== BookingStatus.CANCELLED &&
-        next !== BookingStatus.COMPLETED
-      ) {
+      if (current.rental) {
         return NextResponse.json(
-          { error: "Unsupported status transition." },
+          { error: "Booking is already checked in." },
           { status: 400 },
         );
+      }
+
+      const equipmentCategoryId =
+        typeof b.equipmentCategoryId === "string"
+          ? b.equipmentCategoryId.trim()
+          : "";
+      const quantityRaw = b.quantity;
+      const quantity = Math.trunc(Number(quantityRaw ?? current.participants ?? 1));
+
+      if (!equipmentCategoryId) {
+        return NextResponse.json(
+          { error: "equipmentCategoryId is required for check-in." },
+          { status: 400 },
+        );
+      }
+      if (!Number.isFinite(quantity) || quantity < 1 || quantity > 100) {
+        return NextResponse.json(
+          { error: "quantity must be an integer between 1 and 100." },
+          { status: 400 },
+        );
+      }
+
+      const now = new Date();
+
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          const category = await tx.equipmentCategory.findFirst({
+            where: { id: equipmentCategoryId, businessId },
+            select: { id: true, totalQuantity: true },
+          });
+          if (!category) throw new Error("category_not_found");
+
+          // Availability check: sum of active quantities overlapping now window.
+          const overlap = await tx.rental.aggregate({
+            where: {
+              businessId,
+              equipmentCategoryId,
+              status: { in: [RentalStatus.ACTIVE, RentalStatus.OVERDUE] },
+              startAt: { lt: current.endAt },
+              endAt: { gt: now },
+            },
+            _sum: { quantity: true },
+          });
+          const inUse = overlap._sum.quantity ?? 0;
+          if (inUse + quantity > category.totalQuantity) {
+            throw new Error("insufficient_inventory");
+          }
+
+          const rental = await tx.rental.create({
+            data: {
+              businessId,
+              customerId: current.customerId,
+              bookingId: current.id,
+              equipmentCategoryId,
+              quantity,
+              startAt: now,
+              endAt: current.endAt,
+              status: RentalStatus.ACTIVE,
+            },
+            select: { id: true },
+          });
+
+          const booking = await tx.booking.update({
+            where: { id: current.id },
+            data: { status: BookingStatus.CHECKED_IN },
+          });
+
+          return { rentalId: rental.id, booking };
+        });
+
+        return NextResponse.json({ data: result.booking, rentalId: result.rentalId });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === "category_not_found") {
+          return NextResponse.json(
+            { error: "equipmentCategoryId not found for this business." },
+            { status: 400 },
+          );
+        }
+        if (msg === "insufficient_inventory") {
+          return NextResponse.json(
+            { error: "Not enough equipment available for this time window." },
+            { status: 409 },
+          );
+        }
+        throw e;
       }
     }
-    data.status = next;
+
+    if (next === BookingStatus.COMPLETED) {
+      if (current.status !== BookingStatus.CHECKED_IN) {
+        return NextResponse.json(
+          { error: "Only checked-in bookings can be completed." },
+          { status: 400 },
+        );
+      }
+      data.status = BookingStatus.COMPLETED;
+    } else if (next === BookingStatus.CANCELLED) {
+      if (current.status !== BookingStatus.BOOKED) {
+        return NextResponse.json(
+          { error: "Only booked bookings can be cancelled." },
+          { status: 400 },
+        );
+      }
+      data.status = BookingStatus.CANCELLED;
+    } else if (next === BookingStatus.NO_SHOW) {
+      if (current.status !== BookingStatus.BOOKED) {
+        return NextResponse.json(
+          { error: "Only booked bookings can be marked no-show." },
+          { status: 400 },
+        );
+      }
+      data.status = BookingStatus.NO_SHOW;
+    } else if (next === BookingStatus.BOOKED) {
+      return NextResponse.json(
+        { error: "Cannot transition back to BOOKED." },
+        { status: 400 },
+      );
+    }
   }
 
   const updated = await prisma.booking.update({

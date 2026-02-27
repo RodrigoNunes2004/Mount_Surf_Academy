@@ -123,12 +123,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         data: {
           status: RentalStatus.RETURNED,
           endAt: now,
+          returnedAt: now,
         },
       });
-      await tx.equipment.update({
-        where: { id: current.equipmentId },
-        data: { status: EquipmentStatus.AVAILABLE },
-      });
+      if (current.equipmentId) {
+        await tx.equipment.update({
+          where: { id: current.equipmentId },
+          data: { status: EquipmentStatus.AVAILABLE },
+        });
+      }
       return r;
     });
 
@@ -154,10 +157,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         where: { id },
         data: { status: RentalStatus.CANCELLED },
       });
-      await tx.equipment.update({
-        where: { id: current.equipmentId },
-        data: { status: EquipmentStatus.AVAILABLE },
-      });
+      if (current.equipmentId) {
+        await tx.equipment.update({
+          where: { id: current.equipmentId },
+          data: { status: EquipmentStatus.AVAILABLE },
+        });
+      }
       return r;
     });
 
