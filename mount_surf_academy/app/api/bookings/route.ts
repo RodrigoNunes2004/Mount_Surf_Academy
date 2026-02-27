@@ -76,6 +76,22 @@ export async function POST(req: NextRequest) {
       : b.startAt instanceof Date
         ? b.startAt
         : null;
+  const participantsRaw = b.participants;
+  const participants =
+    typeof participantsRaw === "number" && Number.isFinite(participantsRaw)
+      ? Math.trunc(participantsRaw)
+      : typeof participantsRaw === "string" && participantsRaw.trim()
+        ? Math.trunc(Number(participantsRaw))
+        : 1;
+
+  const durationMinutesRaw = b.durationMinutes;
+  const durationMinutes =
+    typeof durationMinutesRaw === "number" && Number.isFinite(durationMinutesRaw)
+      ? Math.trunc(durationMinutesRaw)
+      : typeof durationMinutesRaw === "string" && durationMinutesRaw.trim()
+        ? Math.trunc(Number(durationMinutesRaw))
+        : null;
+
   const endAt =
     typeof b.endAt === "string" && b.endAt.trim()
       ? new Date(b.endAt)
@@ -95,11 +111,17 @@ export async function POST(req: NextRequest) {
   if (!startAt || Number.isNaN(startAt.getTime())) {
     return NextResponse.json({ error: "startAt is required and must be a date." }, { status: 400 });
   }
-  if (!endAt || Number.isNaN(endAt.getTime())) {
-    return NextResponse.json({ error: "endAt is required and must be a date." }, { status: 400 });
+  if (!Number.isFinite(participants) || participants < 1 || participants > 100) {
+    return NextResponse.json(
+      { error: "participants must be an integer between 1 and 100." },
+      { status: 400 },
+    );
   }
-  if (endAt <= startAt) {
-    return NextResponse.json({ error: "endAt must be after startAt." }, { status: 400 });
+  if (durationMinutes !== null && (!Number.isFinite(durationMinutes) || durationMinutes < 15 || durationMinutes > 24 * 60)) {
+    return NextResponse.json(
+      { error: "durationMinutes must be between 15 and 1440." },
+      { status: 400 },
+    );
   }
 
   const customer = await prisma.customer.findFirst({
@@ -116,7 +138,7 @@ export async function POST(req: NextRequest) {
   if (lessonId) {
     const lesson = await prisma.lesson.findFirst({
       where: { id: lessonId, businessId },
-      select: { id: true },
+      select: { id: true, capacity: true, durationMinutes: true },
     });
     if (!lesson) {
       return NextResponse.json(
@@ -124,15 +146,59 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+
+    if (lesson.capacity !== null && lesson.capacity !== undefined && participants > lesson.capacity) {
+      return NextResponse.json(
+        { error: "participants exceeds lesson capacity." },
+        { status: 400 },
+      );
+    }
+
+    const mins = durationMinutes ?? lesson.durationMinutes ?? 60;
+    const computedEndAt = new Date(startAt.getTime() + mins * 60_000);
+    if (!endAt) {
+      // use computed
+      // eslint-disable-next-line no-param-reassign
+      (b as Record<string, unknown>).endAt = computedEndAt;
+    } else if (Number.isNaN(endAt.getTime())) {
+      return NextResponse.json({ error: "endAt must be a valid date." }, { status: 400 });
+    }
+
+    const finalEnd = (b.endAt as Date) ?? computedEndAt;
+    if (finalEnd <= startAt) {
+      return NextResponse.json({ error: "endAt must be after startAt." }, { status: 400 });
+    }
+
+    const booking = await prisma.booking.create({
+      data: {
+        businessId,
+        customerId,
+        lessonId,
+        startAt,
+        endAt: finalEnd,
+        participants,
+        ...(status ? { status } : {}),
+      },
+    });
+
+    return NextResponse.json({ data: booking }, { status: 201 });
+  }
+
+  if (!endAt || Number.isNaN(endAt.getTime())) {
+    return NextResponse.json({ error: "endAt is required and must be a date." }, { status: 400 });
+  }
+  if (endAt <= startAt) {
+    return NextResponse.json({ error: "endAt must be after startAt." }, { status: 400 });
   }
 
   const booking = await prisma.booking.create({
     data: {
       businessId,
       customerId,
-      lessonId: lessonId || null,
+      lessonId: null,
       startAt,
       endAt,
+      participants,
       ...(status ? { status } : {}),
     },
   });

@@ -112,6 +112,7 @@ model Lesson {
   title       String
   price       Decimal   @db.Decimal(10,2)
   capacity    Int?
+  durationMinutes Int @default(60)
 
   bookings    Booking[]
 
@@ -132,6 +133,7 @@ model Booking {
 
   startAt     DateTime
   endAt       DateTime
+  participants Int @default(1)
   status      BookingStatus @default(BOOKED)
 
   payments    Payment[]

@@ -1,0 +1,295 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
+import { Check, ChevronsUpDown } from "lucide-react";
+
+type CustomerOption = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+};
+
+type LessonOption = {
+  id: string;
+  title: string;
+  durationMinutes: number;
+  capacity: number | null;
+};
+
+function toDateTimeLocalValue(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function CreateLessonBookingDialog({
+  customers,
+  lessons,
+}: {
+  customers: CustomerOption[];
+  lessons: LessonOption[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const now = useMemo(() => new Date(), []);
+  const [customerId, setCustomerId] = useState("");
+  const [lessonId, setLessonId] = useState("");
+  const [participants, setParticipants] = useState(1);
+  const [startAt, setStartAt] = useState(toDateTimeLocalValue(now));
+
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const [lessonOpen, setLessonOpen] = useState(false);
+
+  const selectedCustomer = useMemo(
+    () => customers.find((c) => c.id === customerId) ?? null,
+    [customers, customerId],
+  );
+  const selectedLesson = useMemo(
+    () => lessons.find((l) => l.id === lessonId) ?? null,
+    [lessons, lessonId],
+  );
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    const res = await fetch("/api/bookings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerId,
+        lessonId,
+        participants,
+        startAt: new Date(startAt).toISOString(),
+        durationMinutes: selectedLesson?.durationMinutes ?? 60,
+      }),
+    });
+
+    setLoading(false);
+
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+      setError(payload?.error ?? "Failed to create booking.");
+      return;
+    }
+
+    setOpen(false);
+    setCustomerId("");
+    setLessonId("");
+    setParticipants(1);
+    router.refresh();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button>Add booking</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New lesson booking</DialogTitle>
+          <DialogDescription>
+            Select date/time and participants. Equipment is auto-included.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form className="grid gap-4" onSubmit={onSubmit}>
+          <div className="grid gap-2">
+            <Label htmlFor="customer">Customer</Label>
+            <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={customerOpen}
+                  className="h-10 w-full justify-between"
+                  id="customer"
+                >
+                  {selectedCustomer ? (
+                    <span className="truncate">
+                      {selectedCustomer.firstName} {selectedCustomer.lastName}
+                      {selectedCustomer.phone ? ` • ${selectedCustomer.phone}` : ""}
+                      {selectedCustomer.email ? ` • ${selectedCustomer.email}` : ""}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Type to search customer…
+                    </span>
+                  )}
+                  <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                <Command>
+                  <CommandInput placeholder="Search customer..." />
+                  <CommandList>
+                    <CommandEmpty>No customer found.</CommandEmpty>
+                    <CommandGroup>
+                      {customers.map((c) => {
+                        const label = `${c.firstName} ${c.lastName}${
+                          c.phone ? ` • ${c.phone}` : ""
+                        }${c.email ? ` • ${c.email}` : ""}`;
+                        return (
+                          <CommandItem
+                            key={c.id}
+                            value={label}
+                            onSelect={() => {
+                              setCustomerId(c.id);
+                              setCustomerOpen(false);
+                            }}
+                            className="gap-2"
+                          >
+                            <Check
+                              className={cn(
+                                "size-4",
+                                customerId === c.id ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <span className="truncate">{label}</span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="lesson">Lesson</Label>
+            <Popover open={lessonOpen} onOpenChange={setLessonOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={lessonOpen}
+                  className="h-10 w-full justify-between"
+                  id="lesson"
+                >
+                  {selectedLesson ? (
+                    <span className="truncate">
+                      {selectedLesson.title} • {selectedLesson.durationMinutes} min
+                      {selectedLesson.capacity ? ` • cap ${selectedLesson.capacity}` : ""}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Type to search lesson…
+                    </span>
+                  )}
+                  <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                <Command>
+                  <CommandInput placeholder="Search lesson..." />
+                  <CommandList>
+                    <CommandEmpty>No lesson found.</CommandEmpty>
+                    <CommandGroup>
+                      {lessons.map((l) => {
+                        const label = `${l.title} • ${l.durationMinutes} min${
+                          l.capacity ? ` • cap ${l.capacity}` : ""
+                        }`;
+                        return (
+                          <CommandItem
+                            key={l.id}
+                            value={label}
+                            onSelect={() => {
+                              setLessonId(l.id);
+                              setLessonOpen(false);
+                            }}
+                            className="gap-2"
+                          >
+                            <Check
+                              className={cn(
+                                "size-4",
+                                lessonId === l.id ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <span className="truncate">{label}</span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="startAt">Start</Label>
+              <Input
+                id="startAt"
+                type="datetime-local"
+                value={startAt}
+                onChange={(e) => setStartAt(e.target.value)}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="participants">Participants</Label>
+              <Input
+                id="participants"
+                type="number"
+                min={1}
+                max={100}
+                value={participants}
+                onChange={(e) => setParticipants(Math.trunc(Number(e.target.value)))}
+                required
+              />
+            </div>
+          </div>
+
+          {error ? <div className="text-sm text-destructive">{error}</div> : null}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading || !customerId || !lessonId}
+            >
+              {loading ? "Creating..." : "Create booking"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
