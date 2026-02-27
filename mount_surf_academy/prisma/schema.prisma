@@ -171,6 +171,7 @@ enum RentalStatus {
   ACTIVE
   RETURNED
   OVERDUE
+  CANCELLED
 }
 
 model Payment {

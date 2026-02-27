@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { RentalStatus } from "@prisma/client";
+import { EquipmentStatus, RentalStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../../_lib/tenant";
 
@@ -50,51 +50,24 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const b = body as Record<string, unknown>;
+  const now = new Date();
+
+  const current = await prisma.rental.findFirst({
+    where: { id, businessId },
+    select: {
+      id: true,
+      equipmentId: true,
+      status: true,
+      startAt: true,
+      endAt: true,
+    },
+  });
+  if (!current) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+
   const data: Record<string, unknown> = {};
 
-  if (typeof b.customerId === "string") {
-    const v = b.customerId.trim();
-    if (!v) {
-      return NextResponse.json({ error: "customerId cannot be empty." }, { status: 400 });
-    }
-    const customer = await prisma.customer.findFirst({
-      where: { id: v, businessId },
-      select: { id: true },
-    });
-    if (!customer) {
-      return NextResponse.json(
-        { error: "customerId not found for this business." },
-        { status: 400 },
-      );
-    }
-    data.customerId = v;
-  }
-
-  if (typeof b.equipmentId === "string") {
-    const v = b.equipmentId.trim();
-    if (!v) {
-      return NextResponse.json({ error: "equipmentId cannot be empty." }, { status: 400 });
-    }
-    const equipment = await prisma.equipment.findFirst({
-      where: { id: v, businessId },
-      select: { id: true },
-    });
-    if (!equipment) {
-      return NextResponse.json(
-        { error: "equipmentId not found for this business." },
-        { status: 400 },
-      );
-    }
-    data.equipmentId = v;
-  }
-
-  if (typeof b.startAt === "string" && b.startAt.trim()) {
-    const d = new Date(b.startAt);
-    if (Number.isNaN(d.getTime())) {
-      return NextResponse.json({ error: "startAt must be a valid date." }, { status: 400 });
-    }
-    data.startAt = d;
-  }
   if (typeof b.endAt === "string" && b.endAt.trim()) {
     const d = new Date(b.endAt);
     if (Number.isNaN(d.getTime())) {
@@ -103,35 +76,103 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     data.endAt = d;
   }
 
-  if ("startAt" in data || "endAt" in data) {
-    const current = await prisma.rental.findFirst({
-      where: { id, businessId },
-      select: { startAt: true, endAt: true },
-    });
-    if (!current) {
-      return NextResponse.json({ error: "Not found." }, { status: 404 });
-    }
-    const startAt = (data.startAt as Date | undefined) ?? current.startAt;
-    const endAt = (data.endAt as Date | undefined) ?? current.endAt;
-    if (endAt <= startAt) {
+  if ("endAt" in data) {
+    const endAt = data.endAt as Date;
+    if (endAt <= current.startAt) {
       return NextResponse.json({ error: "endAt must be after startAt." }, { status: 400 });
     }
-  }
-
-  if (typeof b.status === "string") {
-    const s = b.status.trim();
-    if (!RENTAL_STATUSES.includes(s as RentalStatus)) {
+    if (
+      current.status !== RentalStatus.ACTIVE &&
+      current.status !== RentalStatus.OVERDUE
+    ) {
       return NextResponse.json(
-        { error: `status must be one of: ${RENTAL_STATUSES.join(", ")}` },
+        { error: "Only active rentals can be edited." },
         { status: 400 },
       );
     }
-    data.status = s as RentalStatus;
   }
 
-  const exists = await prisma.rental.findFirst({ where: { id, businessId } });
-  if (!exists) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const statusRequested =
+    typeof b.status === "string" ? b.status.trim() : undefined;
+  const status =
+    statusRequested && RENTAL_STATUSES.includes(statusRequested as RentalStatus)
+      ? (statusRequested as RentalStatus)
+      : undefined;
+
+  if (statusRequested && !status) {
+    return NextResponse.json(
+      { error: `status must be one of: ${RENTAL_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
+  if (status === RentalStatus.RETURNED) {
+    if (
+      current.status !== RentalStatus.ACTIVE &&
+      current.status !== RentalStatus.OVERDUE
+    ) {
+      return NextResponse.json(
+        { error: "Only active rentals can be returned." },
+        { status: 400 },
+      );
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const r = await tx.rental.update({
+        where: { id },
+        data: {
+          status: RentalStatus.RETURNED,
+          endAt: now,
+        },
+      });
+      await tx.equipment.update({
+        where: { id: current.equipmentId },
+        data: { status: EquipmentStatus.AVAILABLE },
+      });
+      return r;
+    });
+
+    return NextResponse.json({ data: updated });
+  }
+
+  if (status === RentalStatus.CANCELLED) {
+    if (current.status !== RentalStatus.ACTIVE) {
+      return NextResponse.json(
+        { error: "Only active rentals can be cancelled." },
+        { status: 400 },
+      );
+    }
+    if (current.startAt <= now) {
+      return NextResponse.json(
+        { error: "Only rentals that haven't started can be cancelled." },
+        { status: 400 },
+      );
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const r = await tx.rental.update({
+        where: { id },
+        data: { status: RentalStatus.CANCELLED },
+      });
+      await tx.equipment.update({
+        where: { id: current.equipmentId },
+        data: { status: EquipmentStatus.AVAILABLE },
+      });
+      return r;
+    });
+
+    return NextResponse.json({ data: updated });
+  }
+
+  if (status) {
+    return NextResponse.json(
+      { error: "Unsupported status transition." },
+      { status: 400 },
+    );
+  }
+
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: "No updates provided." }, { status: 400 });
   }
 
   const updated = await prisma.rental.update({
@@ -144,20 +185,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const businessId = await resolveBusinessId(req);
-  if (!businessId) {
-    return NextResponse.json(
-      { error: "Missing tenant. Provide x-business-id header." },
-      { status: 400 },
-    );
-  }
-
-  const exists = await prisma.rental.findFirst({ where: { id, businessId } });
-  if (!exists) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
-  }
-
-  await prisma.rental.delete({ where: { id } });
-  return NextResponse.json({ ok: true });
+  void req;
+  void params;
+  void id;
+  return NextResponse.json(
+    { error: "Rentals cannot be deleted." },
+    { status: 405 },
+  );
 }
 

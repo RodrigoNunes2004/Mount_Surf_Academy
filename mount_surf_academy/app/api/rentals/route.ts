@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { RentalStatus } from "@prisma/client";
+import { EquipmentStatus, RentalStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../_lib/tenant";
 
@@ -116,27 +116,67 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const equipment = await prisma.equipment.findFirst({
-    where: { id: equipmentId, businessId },
-    select: { id: true },
-  });
-  if (!equipment) {
+  const now = new Date();
+  if (status === RentalStatus.RETURNED) {
     return NextResponse.json(
-      { error: "equipmentId not found for this business." },
+      { error: "Cannot create a returned rental." },
       { status: 400 },
     );
   }
+  if (status === RentalStatus.CANCELLED) {
+    return NextResponse.json(
+      { error: "Cannot create a cancelled rental." },
+      { status: 400 },
+    );
+  }
+  void now;
 
-  const rental = await prisma.rental.create({
-    data: {
-      businessId,
-      customerId,
-      equipmentId,
-      startAt,
-      endAt,
-      ...(status ? { status } : {}),
-    },
-  });
+  let rental;
+  try {
+    rental = await prisma.$transaction(async (tx) => {
+      const eq = await tx.equipment.findFirst({
+        where: { id: equipmentId, businessId },
+        select: { id: true, status: true },
+      });
+      if (!eq) throw new Error("equipment_not_found");
+      if (eq.status !== EquipmentStatus.AVAILABLE) {
+        throw new Error("equipment_not_available");
+      }
+
+      const created = await tx.rental.create({
+        data: {
+          businessId,
+          customerId,
+          equipmentId,
+          startAt,
+          endAt,
+          ...(status ? { status } : {}),
+        },
+      });
+
+      await tx.equipment.update({
+        where: { id: equipmentId },
+        data: { status: EquipmentStatus.RENTED },
+      });
+
+      return created;
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "equipment_not_found") {
+      return NextResponse.json(
+        { error: "equipmentId not found for this business." },
+        { status: 400 },
+      );
+    }
+    if (msg === "equipment_not_available") {
+      return NextResponse.json(
+        { error: "Equipment is not available." },
+        { status: 409 },
+      );
+    }
+    throw e;
+  }
 
   return NextResponse.json({ data: rental }, { status: 201 });
 }
