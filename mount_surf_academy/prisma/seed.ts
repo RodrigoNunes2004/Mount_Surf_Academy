@@ -9,7 +9,8 @@ const scrypt = promisify(_scrypt);
 async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const derivedKey = (await scrypt(password, salt, 64)) as Buffer;
-  return `scrypt$${salt}$${derivedKey.toString("hex")}`;
+  // format: scrypt$$<saltHex>$<derivedKeyHex>
+  return `scrypt$$${salt}$${derivedKey.toString("hex")}`;
 }
 
 async function main() {
@@ -27,7 +28,9 @@ async function main() {
   const businessLocation =
     process.env.SEED_BUSINESS_LOCATION ?? "Mount Maunganui, New Zealand";
 
-  const ownerEmail = process.env.SEED_OWNER_EMAIL ?? "owner@mountsurf.local";
+  const ownerEmail = (process.env.SEED_OWNER_EMAIL ?? "owner@mountsurf.local")
+    .trim()
+    .toLowerCase();
   const ownerName = process.env.SEED_OWNER_NAME ?? "Owner";
   const ownerPassword = process.env.SEED_OWNER_PASSWORD ?? "ChangeMe123!";
 

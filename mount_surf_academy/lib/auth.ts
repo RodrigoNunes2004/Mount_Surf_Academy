@@ -8,12 +8,17 @@ import { promisify } from "util";
 const scrypt = promisify(_scrypt);
 
 async function verifyPassword(plainText: string, stored: string) {
-  // format: scrypt$$<saltHex>$<derivedKeyHex>
-  if (!stored.startsWith("scrypt$$")) return false;
+  // supported formats:
+  // - scrypt$$<saltHex>$<derivedKeyHex> (preferred)
+  // - scrypt$<saltHex>$<derivedKeyHex>  (legacy)
   const parts = stored.split("$");
-  if (parts.length !== 4) return false;
-  const salt = parts[2];
-  const expectedHex = parts[3];
+  if (parts.length !== 3 && parts.length !== 4) return false;
+
+  const [scheme, maybeEmpty, saltMaybe, expectedMaybe] = parts;
+  if (scheme !== "scrypt") return false;
+
+  const salt = parts.length === 4 ? saltMaybe : maybeEmpty;
+  const expectedHex = parts.length === 4 ? expectedMaybe : saltMaybe;
   if (!salt || !expectedHex) return false;
 
   const derived = (await scrypt(plainText, salt, 64)) as Buffer;
