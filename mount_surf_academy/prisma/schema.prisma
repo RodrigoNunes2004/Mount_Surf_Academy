@@ -53,6 +53,7 @@ model Customer {
   email      String?
   dob        DateTime?
   notes      String?
+  archivedAt DateTime?
 
   bookings   Booking[]
   rentals    Rental[]

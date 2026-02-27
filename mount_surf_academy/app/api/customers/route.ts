@@ -13,31 +13,58 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q")?.trim();
+  const status = (searchParams.get("status") ?? "active").trim().toLowerCase();
+  const sort = (searchParams.get("sort") ?? "newest").trim().toLowerCase();
   const takeRaw = searchParams.get("take");
   const skipRaw = searchParams.get("skip");
-  const take = Math.min(Math.max(Number(takeRaw ?? 50) || 50, 1), 200);
+  const take = Math.min(Math.max(Number(takeRaw ?? 20) || 20, 1), 50);
   const skip = Math.max(Number(skipRaw ?? 0) || 0, 0);
 
-  const customers = await prisma.customer.findMany({
-    where: {
-      businessId,
-      ...(q
-        ? {
-            OR: [
-              { firstName: { contains: q, mode: "insensitive" } },
-              { lastName: { contains: q, mode: "insensitive" } },
-              { email: { contains: q, mode: "insensitive" } },
-              { phone: { contains: q, mode: "insensitive" } },
-            ],
-          }
-        : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    take,
-    skip,
-  });
+  const archivedWhere =
+    status === "archived"
+      ? { archivedAt: { not: null } }
+      : status === "all"
+        ? {}
+        : { archivedAt: null };
 
-  return NextResponse.json({ data: customers });
+  const where = {
+    businessId,
+    ...archivedWhere,
+    ...(q
+      ? {
+          OR: [
+            { firstName: { contains: q, mode: "insensitive" as const } },
+            { lastName: { contains: q, mode: "insensitive" as const } },
+            { email: { contains: q, mode: "insensitive" as const } },
+            { phone: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+
+  const orderBy =
+    sort === "name_asc"
+      ? [{ lastName: "asc" as const }, { firstName: "asc" as const }]
+      : sort === "name_desc"
+        ? [{ lastName: "desc" as const }, { firstName: "desc" as const }]
+        : sort === "oldest"
+          ? [{ createdAt: "asc" as const }]
+          : [{ createdAt: "desc" as const }];
+
+  const [total, customers] = await Promise.all([
+    prisma.customer.count({ where }),
+    prisma.customer.findMany({
+      where,
+      orderBy,
+      take,
+      skip,
+    }),
+  ]);
+
+  return NextResponse.json({
+    data: customers,
+    meta: { total, take, skip, status, sort, q: q ?? "" },
+  });
 }
 
 export async function POST(req: NextRequest) {

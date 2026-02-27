@@ -57,6 +57,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (b.email === null) data.email = null;
   if (typeof b.notes === "string") data.notes = b.notes;
   if (b.notes === null) data.notes = null;
+  if (b.archivedAt === null) data.archivedAt = null;
   if (typeof b.dob === "string" && b.dob.trim()) {
     const d = new Date(b.dob);
     if (Number.isNaN(d.getTime())) {
@@ -101,7 +102,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  await prisma.customer.delete({ where: { id } });
-  return NextResponse.json({ ok: true });
+  if (exists.archivedAt) {
+    return NextResponse.json({ ok: true, archived: true });
+  }
+
+  const archived = await prisma.customer.update({
+    where: { id },
+    data: { archivedAt: new Date() },
+  });
+
+  return NextResponse.json({ ok: true, archivedAt: archived.archivedAt });
 }
 
