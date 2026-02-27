@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { RentalStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -25,7 +24,7 @@ export function ReturnRentalButton({ rentalId }: { rentalId: string }) {
     await fetch(`/api/rentals/${rentalId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: RentalStatus.RETURNED }),
+      body: JSON.stringify({ status: "RETURNED" }),
     });
     setLoading(false);
     router.refresh();
@@ -71,7 +70,7 @@ export function CancelRentalButton({
     await fetch(`/api/rentals/${rentalId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: RentalStatus.CANCELLED }),
+      body: JSON.stringify({ status: "CANCELLED" }),
     });
     setLoading(false);
     router.refresh();

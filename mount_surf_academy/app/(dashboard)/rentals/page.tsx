@@ -1,4 +1,4 @@
-import { RentalStatus } from "@prisma/client";
+import type { RentalStatus as PrismaRentalStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/server/session";
 import { CreateRentalDialog } from "@/components/rentals/create-rental-dialog";
@@ -18,10 +18,19 @@ type SearchParams = {
   status?: string;
 };
 
-function statusBadge(status: RentalStatus) {
-  if (status === RentalStatus.RETURNED) return <Badge variant="secondary">Returned</Badge>;
-  if (status === RentalStatus.CANCELLED) return <Badge variant="secondary">Cancelled</Badge>;
-  if (status === RentalStatus.OVERDUE) return <Badge variant="destructive">Overdue</Badge>;
+const RENTAL_STATUS = {
+  ACTIVE: "ACTIVE",
+  RETURNED: "RETURNED",
+  OVERDUE: "OVERDUE",
+  CANCELLED: "CANCELLED",
+} as const;
+
+type RentalStatusLike = (typeof RENTAL_STATUS)[keyof typeof RENTAL_STATUS] | string;
+
+function statusBadge(status: RentalStatusLike) {
+  if (status === RENTAL_STATUS.RETURNED) return <Badge variant="secondary">Returned</Badge>;
+  if (status === RENTAL_STATUS.CANCELLED) return <Badge variant="secondary">Cancelled</Badge>;
+  if (status === RENTAL_STATUS.OVERDUE) return <Badge variant="destructive">Overdue</Badge>;
   return <Badge>Active</Badge>;
 }
 
@@ -35,18 +44,27 @@ export default async function RentalsPage({
 
   const sp = await searchParams;
   const statusRaw = (sp.status ?? "active").toLowerCase();
-  const statusFilter =
+  const statusFilter: PrismaRentalStatus[] =
     statusRaw === "returned"
-      ? [RentalStatus.RETURNED]
+      ? [RENTAL_STATUS.RETURNED as PrismaRentalStatus]
       : statusRaw === "cancelled"
-        ? [RentalStatus.CANCELLED]
+        ? [RENTAL_STATUS.CANCELLED as PrismaRentalStatus]
         : statusRaw === "history"
-          ? [RentalStatus.RETURNED, RentalStatus.CANCELLED]
-          : [RentalStatus.ACTIVE, RentalStatus.OVERDUE];
+          ? [
+              RENTAL_STATUS.RETURNED as PrismaRentalStatus,
+              RENTAL_STATUS.CANCELLED as PrismaRentalStatus,
+            ]
+          : [
+              RENTAL_STATUS.ACTIVE as PrismaRentalStatus,
+              RENTAL_STATUS.OVERDUE as PrismaRentalStatus,
+            ];
+
+  const customerWhere = { businessId } as Record<string, unknown>;
+  customerWhere.archivedAt = null;
 
   const [customers, equipment, rentals] = await Promise.all([
     prisma.customer.findMany({
-      where: { businessId, archivedAt: null },
+      where: customerWhere as never,
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       take: 200,
       select: {
@@ -125,9 +143,10 @@ export default async function RentalsPage({
               <TableBody>
                 {rentals.map((r) => {
                   const canCancel =
-                    r.status === RentalStatus.ACTIVE && r.startAt > now;
+                    r.status === RENTAL_STATUS.ACTIVE && r.startAt > now;
                   const canReturn =
-                    r.status === RentalStatus.ACTIVE || r.status === RentalStatus.OVERDUE;
+                    r.status === RENTAL_STATUS.ACTIVE ||
+                    r.status === RENTAL_STATUS.OVERDUE;
 
                   return (
                     <TableRow key={r.id}>
