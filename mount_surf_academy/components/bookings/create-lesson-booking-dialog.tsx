@@ -41,6 +41,12 @@ type LessonOption = {
   price?: unknown;
 };
 
+type InstructorOption = {
+  id: string;
+  firstName: string;
+  lastName: string;
+};
+
 type VariantOption = {
   id: string;
   label: string;
@@ -58,11 +64,13 @@ function toDateTimeLocalValue(d: Date) {
 export function CreateLessonBookingDialog({
   customers,
   lessons,
+  instructors,
   categories,
   variants,
 }: {
   customers: CustomerOption[];
   lessons: LessonOption[];
+  instructors: InstructorOption[];
   categories: CategoryOption[];
   variants: VariantOption[];
 }) {
@@ -74,6 +82,7 @@ export function CreateLessonBookingDialog({
   const now = useMemo(() => new Date(), []);
   const [customerId, setCustomerId] = useState("");
   const [lessonId, setLessonId] = useState("");
+  const [instructorId, setInstructorId] = useState("");
   const [participants, setParticipants] = useState(1);
   const [startAt, setStartAt] = useState(toDateTimeLocalValue(now));
   const [boardVariantId, setBoardVariantId] = useState("");
@@ -82,6 +91,7 @@ export function CreateLessonBookingDialog({
 
   const [customerOpen, setCustomerOpen] = useState(false);
   const [lessonOpen, setLessonOpen] = useState(false);
+  const [instructorOpen, setInstructorOpen] = useState(false);
 
   const boardVariants = variants.filter(
     (v) => v.category.name === "Softboard" || v.category.name === "Hardboard",
@@ -96,6 +106,10 @@ export function CreateLessonBookingDialog({
     () => lessons.find((l) => l.id === lessonId) ?? null,
     [lessons, lessonId],
   );
+  const selectedInstructor = useMemo(
+    () => instructors.find((i) => i.id === instructorId) ?? null,
+    [instructors, instructorId],
+  );
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -104,6 +118,10 @@ export function CreateLessonBookingDialog({
 
     if (!boardVariantId || !wetsuitVariantId) {
       setError("Select board and wetsuit sizes.");
+      return;
+    }
+    if (!instructorId) {
+      setError("Select an instructor.");
       return;
     }
 
@@ -116,6 +134,7 @@ export function CreateLessonBookingDialog({
         participants,
         startAt: new Date(startAt).toISOString(),
         durationMinutes: selectedLesson?.durationMinutes ?? 60,
+        instructorId,
         equipmentAllocations: [
           { equipmentVariantId: boardVariantId, quantity: participants },
           { equipmentVariantId: wetsuitVariantId, quantity: participants },
@@ -135,6 +154,7 @@ export function CreateLessonBookingDialog({
     setOpen(false);
     setCustomerId("");
     setLessonId("");
+    setInstructorId("");
     setParticipants(1);
     setBoardVariantId("");
     setWetsuitVariantId("");
@@ -204,6 +224,62 @@ export function CreateLessonBookingDialog({
                               className={cn(
                                 "size-4",
                                 customerId === c.id ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <span className="truncate">{label}</span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="instructor">Instructor *</Label>
+            <Popover open={instructorOpen} onOpenChange={setInstructorOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={instructorOpen}
+                  className="h-10 w-full justify-between"
+                  id="instructor"
+                >
+                  {selectedInstructor ? (
+                    <span className="truncate">
+                      {selectedInstructor.firstName} {selectedInstructor.lastName}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Select instructor…</span>
+                  )}
+                  <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                <Command>
+                  <CommandInput placeholder="Search instructor..." />
+                  <CommandList>
+                    <CommandEmpty>No instructor found. Add instructors in Settings.</CommandEmpty>
+                    <CommandGroup>
+                      {instructors.map((i) => {
+                        const label = `${i.firstName} ${i.lastName}`;
+                        return (
+                          <CommandItem
+                            key={i.id}
+                            value={label}
+                            onSelect={() => {
+                              setInstructorId(i.id);
+                              setInstructorOpen(false);
+                            }}
+                            className="gap-2"
+                          >
+                            <Check
+                              className={cn(
+                                "size-4",
+                                instructorId === i.id ? "opacity-100" : "opacity-0",
                               )}
                             />
                             <span className="truncate">{label}</span>
@@ -368,7 +444,14 @@ export function CreateLessonBookingDialog({
             </Button>
             <Button
               type="submit"
-              disabled={loading || !customerId || !lessonId || !boardVariantId || !wetsuitVariantId}
+              disabled={
+                loading ||
+                !customerId ||
+                !lessonId ||
+                !instructorId ||
+                !boardVariantId ||
+                !wetsuitVariantId
+              }
             >
               {loading ? "Creating..." : "Create booking"}
             </Button>

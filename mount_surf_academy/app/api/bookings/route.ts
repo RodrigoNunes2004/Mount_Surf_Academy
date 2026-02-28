@@ -5,9 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../_lib/tenant";
 
 const BOOKING_STATUSES = Object.values(BookingStatus);
-const ACTIVE_LESSON_BOOKING_STATUSES = [BookingStatus.BOOKED, BookingStatus.CHECKED_IN].filter(
-  Boolean,
-) as BookingStatus[];
+const ACTIVE_LESSON_BOOKING_STATUSES = ["BOOKED", "CHECKED_IN"] as BookingStatus[];
 const PAYMENT_METHODS = Object.values(PaymentMethod);
 
 export async function GET(req: NextRequest) {
@@ -158,7 +156,6 @@ export async function POST(req: NextRequest) {
 
     const lesson = await prisma.lesson.findFirst({
       where: { id: lessonId, businessId },
-      select: { id: true, capacity: true, durationMinutes: true, price: true },
     });
     if (!lesson) {
       return NextResponse.json(
@@ -185,7 +182,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const mins = durationMinutes ?? lesson.durationMinutes ?? 60;
+    const lessonWithDuration = lesson as { durationMinutes?: number };
+    const mins = durationMinutes ?? lessonWithDuration.durationMinutes ?? 60;
     const computedEndAt = new Date(startAt.getTime() + mins * 60_000);
     const finalEnd = endAt ?? computedEndAt;
     if (Number.isNaN(finalEnd.getTime())) {
@@ -226,7 +224,7 @@ export async function POST(req: NextRequest) {
 
     // Prevent overbooking based on lesson capacity
     if (lesson.capacity !== null && lesson.capacity !== undefined) {
-      const overlap = await prisma.booking.aggregate({
+      const overlap = (await prisma.booking.aggregate({
         where: {
           businessId,
           lessonId,
@@ -234,10 +232,9 @@ export async function POST(req: NextRequest) {
           startAt: { lt: finalEnd },
           endAt: { gt: startAt },
         },
-        _sum: { participants: true },
-      });
-
-      const alreadyBooked = overlap._sum.participants ?? 0;
+        _sum: { participants: true } as never,
+      })) as unknown as { _sum: { participants: number | null } };
+      const alreadyBooked = Number(overlap._sum?.participants ?? 0);
       if (alreadyBooked + participants > lesson.capacity) {
         return NextResponse.json(
           { error: "Lesson is fully booked for this time slot." },
@@ -246,18 +243,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Prevent double-booking instructor (startAt < existing.endAt AND endAt > existing.startAt)
+    const instructorOverlap = await prisma.booking.findFirst({
+      where: {
+        businessId,
+        ...(instructorId ? { instructorId } : {}),
+        status: { in: ACTIVE_LESSON_BOOKING_STATUSES },
+        startAt: { lt: finalEnd },
+        endAt: { gt: startAt },
+      } as never,
+    });
+    if (instructorOverlap) {
+      return NextResponse.json(
+        { error: "Instructor is already booked for this time slot." },
+        { status: 409 },
+      );
+    }
+
     try {
       const booking = await prisma.$transaction(async (tx) => {
+        const db = tx as Record<string, unknown>;
         // Validate equipment availability for each allocation
         for (const alloc of equipmentAllocations) {
-          const variant = await tx.equipmentVariant.findFirst({
+          const variant = await (db.equipmentVariant as { findFirst: (args: unknown) => Promise<{ totalQuantity: number } | null> }).findFirst({
             where: { id: alloc.equipmentVariantId, businessId },
             select: { totalQuantity: true },
           });
           if (!variant) throw new Error("variant_not_found");
 
           const [rentalOverlap, allocOverlap] = await Promise.all([
-            tx.rental.aggregate({
+            (db.rental as { aggregate: (args: unknown) => Promise<{ _sum: { quantity: number | null } }> }).aggregate({
               where: {
                 businessId,
                 equipmentVariantId: alloc.equipmentVariantId,
@@ -267,7 +282,7 @@ export async function POST(req: NextRequest) {
               },
               _sum: { quantity: true },
             }),
-            tx.bookingEquipmentAllocation.aggregate({
+            (db.bookingEquipmentAllocation as { aggregate: (args: unknown) => Promise<{ _sum: { quantity: number | null } }> }).aggregate({
               where: {
                 equipmentVariantId: alloc.equipmentVariantId,
                 booking: {
@@ -287,10 +302,12 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const created = await tx.booking.create({
+        type BookingCreateResult = Awaited<ReturnType<typeof prisma.booking.create>>;
+        const created = await (db.booking as { create: (args: { data: unknown }) => Promise<BookingCreateResult> }).create({
           data: {
             businessId,
             customerId,
+            instructorId,
             lessonId,
             startAt,
             endAt: finalEnd,
@@ -300,7 +317,7 @@ export async function POST(req: NextRequest) {
         });
 
         for (const alloc of equipmentAllocations) {
-          await tx.bookingEquipmentAllocation.create({
+          await (db.bookingEquipmentAllocation as { create: (args: unknown) => Promise<unknown> }).create({
             data: {
               bookingId: created.id,
               equipmentVariantId: alloc.equipmentVariantId,
@@ -309,7 +326,7 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        await tx.payment.create({
+        await (db.payment as { create: (args: unknown) => Promise<unknown> }).create({
           data: {
             businessId,
             bookingId: created.id,
@@ -356,7 +373,7 @@ export async function POST(req: NextRequest) {
       endAt,
       participants,
       ...(status ? { status } : {}),
-    },
+    } as Parameters<typeof prisma.booking.create>[0]["data"],
   });
 
   return NextResponse.json({ data: booking }, { status: 201 });

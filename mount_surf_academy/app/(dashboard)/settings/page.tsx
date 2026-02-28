@@ -3,9 +3,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BusinessProfileForm } from "@/components/settings/business-profile-form";
 import { IntegrationsSection } from "@/components/settings/integrations-section";
+import { InstructorsSection } from "@/components/settings/instructors-section";
 import { PaymentSettingsForm } from "@/components/settings/payment-settings-form";
 import { prisma } from "@/lib/prisma";
-import { Building2, CreditCard, Plug } from "lucide-react";
+import { Building2, CreditCard, Plug, Users } from "lucide-react";
 
 export default async function SettingsPage() {
   const session = await requireSession();
@@ -25,10 +26,14 @@ export default async function SettingsPage() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-4">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
+        <TabsList className="grid w-full max-w-2xl grid-cols-4">
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <Building2 className="size-4" />
             Business
+          </TabsTrigger>
+          <TabsTrigger value="instructors" className="flex items-center gap-2">
+            <Users className="size-4" />
+            Instructors
           </TabsTrigger>
           <TabsTrigger value="integrations" className="flex items-center gap-2">
             <Plug className="size-4" />
@@ -50,6 +55,21 @@ export default async function SettingsPage() {
             </CardHeader>
             <CardContent>
               <BusinessProfileForm business={business} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="instructors" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Instructor Management</CardTitle>
+              <CardDescription>
+                Add instructors, set hourly rates (for payroll), and toggle active status. Only
+                active instructors appear in the booking form.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <InstructorsSection />
             </CardContent>
           </Card>
         </TabsContent>

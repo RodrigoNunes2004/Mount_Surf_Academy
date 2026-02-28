@@ -50,7 +50,7 @@ export default async function BookingsPage({
           ? [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.NO_SHOW]
           : [BookingStatus.BOOKED, BookingStatus.CHECKED_IN];
 
-  const [customers, lessons, categories, variants, bookings] = await Promise.all([
+  const [customers, lessons, instructors, categories, variants, bookings] = await Promise.all([
     prisma.customer.findMany({
       where: { businessId, archivedAt: null } as never,
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -62,6 +62,12 @@ export default async function BookingsPage({
       orderBy: { createdAt: "desc" },
       take: 200,
       select: { id: true, title: true, durationMinutes: true, capacity: true, price: true },
+    }),
+    prisma.instructor.findMany({
+      where: { businessId, isActive: true },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      take: 100,
+      select: { id: true, firstName: true, lastName: true },
     }),
     prisma.equipmentCategory.findMany({
       where: { businessId },
@@ -81,6 +87,7 @@ export default async function BookingsPage({
       take: 50,
       include: {
         customer: { select: { firstName: true, lastName: true } },
+        instructor: { select: { firstName: true, lastName: true } },
         lesson: { select: { title: true, durationMinutes: true } },
         rental: { select: { id: true } },
       },
@@ -101,6 +108,7 @@ export default async function BookingsPage({
         <CreateLessonBookingDialog
           customers={customers}
           lessons={lessons}
+          instructors={instructors}
           categories={categories}
           variants={variants}
         />
@@ -130,6 +138,7 @@ export default async function BookingsPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>Customer</TableHead>
+                  <TableHead>Instructor</TableHead>
                   <TableHead>Lesson</TableHead>
                   <TableHead>Start</TableHead>
                   <TableHead>End</TableHead>
@@ -147,6 +156,11 @@ export default async function BookingsPage({
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">
                         {b.customer.firstName} {b.customer.lastName}
+                      </TableCell>
+                      <TableCell>
+                        {b.instructor
+                          ? `${b.instructor.firstName} ${b.instructor.lastName}`
+                          : "—"}
                       </TableCell>
                       <TableCell>
                         {b.lesson?.title ?? "—"}
@@ -179,7 +193,7 @@ export default async function BookingsPage({
                 })}
                 {bookings.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center">
+                    <TableCell colSpan={8} className="py-8 text-center">
                       No bookings found.
                     </TableCell>
                   </TableRow>
