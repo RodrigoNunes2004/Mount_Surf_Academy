@@ -67,8 +67,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     data.method = m as PaymentMethod;
   }
 
-  if (typeof b.stripeId === "string") data.stripeId = b.stripeId.trim();
-  if (b.stripeId === null) data.stripeId = null;
+  if (typeof b.stripePaymentIntentId === "string") data.stripePaymentIntentId = b.stripePaymentIntentId.trim();
+  if (b.stripePaymentIntentId === null) data.stripePaymentIntentId = null;
+  if (typeof b.stripeSessionId === "string") data.stripeSessionId = b.stripeSessionId.trim();
+  if (b.stripeSessionId === null) data.stripeSessionId = null;
 
   if (typeof b.bookingId === "string") {
     const v = b.bookingId.trim();

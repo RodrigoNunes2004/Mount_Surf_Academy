@@ -50,7 +50,7 @@ export default async function BookingsPage({
           ? [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.NO_SHOW]
           : [BookingStatus.BOOKED, BookingStatus.CHECKED_IN];
 
-  const [customers, lessons, categories, bookings] = await Promise.all([
+  const [customers, lessons, categories, variants, bookings] = await Promise.all([
     prisma.customer.findMany({
       where: { businessId, archivedAt: null } as never,
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -61,13 +61,19 @@ export default async function BookingsPage({
       where: { businessId },
       orderBy: { createdAt: "desc" },
       take: 200,
-      select: { id: true, title: true, durationMinutes: true, capacity: true },
+      select: { id: true, title: true, durationMinutes: true, capacity: true, price: true },
     }),
     prisma.equipmentCategory.findMany({
       where: { businessId },
       orderBy: { name: "asc" },
       take: 200,
       select: { id: true, name: true, totalQuantity: true },
+    }),
+    prisma.equipmentVariant.findMany({
+      where: { businessId },
+      orderBy: [{ category: { name: "asc" } }, { label: "asc" }],
+      take: 500,
+      select: { id: true, label: true, categoryId: true, category: { select: { id: true, name: true } } },
     }),
     prisma.booking.findMany({
       where: { businessId, status: { in: statusFilter } },
@@ -92,7 +98,12 @@ export default async function BookingsPage({
             Lesson bookings share the same engine as rentals (time windows + status).
           </div>
         </div>
-        <CreateLessonBookingDialog customers={customers} lessons={lessons} />
+        <CreateLessonBookingDialog
+          customers={customers}
+          lessons={lessons}
+          categories={categories}
+          variants={variants}
+        />
       </div>
 
       <Card>

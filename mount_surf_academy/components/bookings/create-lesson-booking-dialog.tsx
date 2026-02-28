@@ -38,7 +38,17 @@ type LessonOption = {
   title: string;
   durationMinutes: number;
   capacity: number | null;
+  price?: unknown;
 };
+
+type VariantOption = {
+  id: string;
+  label: string;
+  categoryId: string;
+  category: { id: string; name: string };
+};
+
+type CategoryOption = { id: string; name: string };
 
 function toDateTimeLocalValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -48,9 +58,13 @@ function toDateTimeLocalValue(d: Date) {
 export function CreateLessonBookingDialog({
   customers,
   lessons,
+  categories,
+  variants,
 }: {
   customers: CustomerOption[];
   lessons: LessonOption[];
+  categories: CategoryOption[];
+  variants: VariantOption[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -62,9 +76,17 @@ export function CreateLessonBookingDialog({
   const [lessonId, setLessonId] = useState("");
   const [participants, setParticipants] = useState(1);
   const [startAt, setStartAt] = useState(toDateTimeLocalValue(now));
+  const [boardVariantId, setBoardVariantId] = useState("");
+  const [wetsuitVariantId, setWetsuitVariantId] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "TRANSFER" | "ONLINE">("CASH");
 
   const [customerOpen, setCustomerOpen] = useState(false);
   const [lessonOpen, setLessonOpen] = useState(false);
+
+  const boardVariants = variants.filter(
+    (v) => v.category.name === "Softboard" || v.category.name === "Hardboard",
+  );
+  const wetsuitVariants = variants.filter((v) => v.category.name === "Wetsuit");
 
   const selectedCustomer = useMemo(
     () => customers.find((c) => c.id === customerId) ?? null,
@@ -80,6 +102,11 @@ export function CreateLessonBookingDialog({
     setError(null);
     setLoading(true);
 
+    if (!boardVariantId || !wetsuitVariantId) {
+      setError("Select board and wetsuit sizes.");
+      return;
+    }
+
     const res = await fetch("/api/bookings", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -89,6 +116,11 @@ export function CreateLessonBookingDialog({
         participants,
         startAt: new Date(startAt).toISOString(),
         durationMinutes: selectedLesson?.durationMinutes ?? 60,
+        equipmentAllocations: [
+          { equipmentVariantId: boardVariantId, quantity: participants },
+          { equipmentVariantId: wetsuitVariantId, quantity: participants },
+        ],
+        paymentMethod,
       }),
     });
 
@@ -104,6 +136,8 @@ export function CreateLessonBookingDialog({
     setCustomerId("");
     setLessonId("");
     setParticipants(1);
+    setBoardVariantId("");
+    setWetsuitVariantId("");
     router.refresh();
   }
 
@@ -116,7 +150,7 @@ export function CreateLessonBookingDialog({
         <DialogHeader>
           <DialogTitle>New lesson booking</DialogTitle>
           <DialogDescription>
-            Select date/time and participants. Equipment is auto-included.
+            Select board and wetsuit sizes. Equipment is reserved for the lesson time.
           </DialogDescription>
         </DialogHeader>
 
@@ -246,6 +280,41 @@ export function CreateLessonBookingDialog({
 
           <div className="grid gap-2 md:grid-cols-2">
             <div className="grid gap-2">
+              <Label htmlFor="boardVariant">Board size</Label>
+              <select
+                id="boardVariant"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={boardVariantId}
+                onChange={(e) => setBoardVariantId(e.target.value)}
+              >
+                <option value="">Select board…</option>
+                {boardVariants.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.category.name} {v.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="wetsuitVariant">Wetsuit size</Label>
+              <select
+                id="wetsuitVariant"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={wetsuitVariantId}
+                onChange={(e) => setWetsuitVariantId(e.target.value)}
+              >
+                <option value="">Select wetsuit…</option>
+                {wetsuitVariants.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2">
               <Label htmlFor="startAt">Start</Label>
               <Input
                 id="startAt"
@@ -269,6 +338,23 @@ export function CreateLessonBookingDialog({
             </div>
           </div>
 
+          <div className="grid gap-2">
+            <Label htmlFor="paymentMethod">Payment method</Label>
+            <select
+              id="paymentMethod"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={paymentMethod}
+              onChange={(e) =>
+                setPaymentMethod(e.target.value as "CASH" | "CARD" | "TRANSFER" | "ONLINE")
+              }
+            >
+              <option value="CASH">Cash</option>
+              <option value="CARD">Card</option>
+              <option value="TRANSFER">Transfer</option>
+              <option value="ONLINE">Online</option>
+            </select>
+          </div>
+
           {error ? <div className="text-sm text-destructive">{error}</div> : null}
 
           <div className="flex justify-end gap-2">
@@ -282,7 +368,7 @@ export function CreateLessonBookingDialog({
             </Button>
             <Button
               type="submit"
-              disabled={loading || !customerId || !lessonId}
+              disabled={loading || !customerId || !lessonId || !boardVariantId || !wetsuitVariantId}
             >
               {loading ? "Creating..." : "Create booking"}
             </Button>

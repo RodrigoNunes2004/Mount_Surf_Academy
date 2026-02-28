@@ -17,7 +17,8 @@ model Business {
   customers   Customer[]
   instructors Instructor[]
   equipment   Equipment[]
-  equipmentCategories EquipmentCategory[]
+  equipmentCategories   EquipmentCategory[]
+  equipmentVariants     EquipmentVariant[]
   lessons     Lesson[]
   bookings    Booking[]
   rentals     Rental[]
@@ -138,11 +139,29 @@ model Booking {
   participants Int @default(1)
   status      BookingStatus @default(BOOKED)
 
+  equipmentAllocations BookingEquipmentAllocation[]
+
   payments    Payment[]
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 }
+
+model BookingEquipmentAllocation {
+  id               String   @id @default(cuid())
+  booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingId        String
+
+  equipmentVariant EquipmentVariant @relation(fields: [equipmentVariantId], references: [id])
+  equipmentVariantId String
+
+  quantity         Int      @default(1)
+
+  createdAt        DateTime @default(now())
+
+  @@index([equipmentVariantId, bookingId])
+}
+
 
 enum BookingStatus {
   BOOKED
@@ -153,20 +172,46 @@ enum BookingStatus {
 }
 
 model EquipmentCategory {
-  id            String    @id @default(cuid())
-  business      Business  @relation(fields: [businessId], references: [id])
-  businessId    String
+  id          String    @id @default(cuid())
+  business    Business  @relation(fields: [businessId], references: [id])
+  businessId  String
 
-  name          String
-  totalQuantity Int       @default(0)
-  hourlyRate    Decimal?  @db.Decimal(10,2)
+  name        String
+  trackSizes  Boolean   @default(true)
+  isActive    Boolean   @default(true)
+  totalQuantity Int     @default(0)
+  hourlyRate  Decimal?  @db.Decimal(10,2)
 
-  rentals       Rental[]
+  variants    EquipmentVariant[]
+  rentals     Rental[]
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@unique([businessId, name])
+}
+
+model EquipmentVariant {
+  id                 String    @id @default(cuid())
+  business           Business  @relation(fields: [businessId], references: [id])
+  businessId         String
+
+  category           EquipmentCategory @relation(fields: [categoryId], references: [id])
+  categoryId         String
+
+  label              String
+  totalQuantity      Int       @default(0)
+  lowStockThreshold  Int       @default(2)
+  isActive           Boolean   @default(true)
+
+  rentals            Rental[]
+
+  bookingAllocations BookingEquipmentAllocation[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([categoryId, label])
 }
 
 model Rental {
@@ -182,17 +227,21 @@ model Rental {
 
   equipmentCategory   EquipmentCategory? @relation(fields: [equipmentCategoryId], references: [id])
   equipmentCategoryId String?
-  quantity            Int @default(1)
+
+  equipmentVariant   EquipmentVariant?  @relation(fields: [equipmentVariantId], references: [id])
+  equipmentVariantId String?
+  quantity           Int @default(1)
 
   equipment   Equipment? @relation(fields: [equipmentId], references: [id])
   equipmentId String?
 
-  startAt     DateTime
-  endAt       DateTime
-  returnedAt  DateTime?
-  status      RentalStatus @default(ACTIVE)
+  startAt       DateTime
+  endAt         DateTime
+  returnedAt    DateTime?
+  priceTotal    Decimal?  @db.Decimal(10,2)
+  status        RentalStatus @default(ACTIVE)
 
-  payments    Payment[]
+  payment   Payment?  @relation("RentalPayment")
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -213,12 +262,15 @@ model Payment {
   booking     Booking?  @relation(fields: [bookingId], references: [id])
   bookingId   String?
 
-  rental      Rental?   @relation(fields: [rentalId], references: [id])
-  rentalId    String?
+  rental      Rental?   @relation("RentalPayment", fields: [rentalId], references: [id])
+  rentalId    String?   @unique
 
   amount      Decimal   @db.Decimal(10,2)
   method      PaymentMethod
-  stripeId    String?
+  status      PaymentStatus @default(PAID)
+  paidAt      DateTime  @default(now())
+  stripePaymentIntentId String?
+  stripeSessionId      String?
 
   createdAt   DateTime  @default(now())
 }
@@ -227,4 +279,10 @@ enum PaymentMethod {
   CASH
   CARD
   TRANSFER
+  ONLINE
+}
+
+enum PaymentStatus {
+  PAID
+  REFUNDED
 }

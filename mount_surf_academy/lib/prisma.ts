@@ -10,7 +10,7 @@ if (!connectionString) {
   throw new Error("Missing DATABASE_URL");
 }
 
-export const prisma =
+export const prisma: PrismaClient =
   globalForPrisma.prisma ||
   new PrismaClient({
     adapter: new PrismaNeon({ connectionString }),

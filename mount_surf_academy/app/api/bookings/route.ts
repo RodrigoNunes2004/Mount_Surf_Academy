@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, PaymentMethod } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../_lib/tenant";
 
@@ -7,6 +8,7 @@ const BOOKING_STATUSES = Object.values(BookingStatus);
 const ACTIVE_LESSON_BOOKING_STATUSES = [BookingStatus.BOOKED, BookingStatus.CHECKED_IN].filter(
   Boolean,
 ) as BookingStatus[];
+const PAYMENT_METHODS = Object.values(PaymentMethod);
 
 export async function GET(req: NextRequest) {
   const businessId = await resolveBusinessId(req);
@@ -148,7 +150,7 @@ export async function POST(req: NextRequest) {
   if (lessonId) {
     const lesson = await prisma.lesson.findFirst({
       where: { id: lessonId, businessId },
-      select: { id: true, capacity: true, durationMinutes: true },
+      select: { id: true, capacity: true, durationMinutes: true, price: true },
     });
     if (!lesson) {
       return NextResponse.json(
@@ -174,7 +176,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "endAt must be after startAt." }, { status: 400 });
     }
 
-    // Prevent overbooking based on lesson capacity.
+    // Parse equipment allocations (board + wetsuit for V1)
+    const allocsRaw = b.equipmentAllocations;
+    const equipmentAllocations: { equipmentVariantId: string; quantity: number }[] = [];
+    if (Array.isArray(allocsRaw) && allocsRaw.length > 0) {
+      for (const a of allocsRaw) {
+        if (a && typeof a === "object" && typeof (a as { equipmentVariantId?: string }).equipmentVariantId === "string") {
+          const qty = Math.max(1, Math.trunc(Number((a as { quantity?: unknown }).quantity)) || 1);
+          equipmentAllocations.push({
+            equipmentVariantId: (a as { equipmentVariantId: string }).equipmentVariantId.trim(),
+            quantity: qty,
+          });
+        }
+      }
+    }
+    if (equipmentAllocations.length < 2) {
+      return NextResponse.json(
+        { error: "Lesson requires board and wetsuit allocation (2 equipment variants)." },
+        { status: 400 },
+      );
+    }
+
+    const methodRaw = typeof b.paymentMethod === "string" ? b.paymentMethod.trim() : "";
+    const method = methodRaw && PAYMENT_METHODS.includes(methodRaw as PaymentMethod)
+      ? (methodRaw as PaymentMethod)
+      : PaymentMethod.CASH;
+
+    const lessonPrice = (lesson as { price: Prisma.Decimal }).price;
+    const amount = new Prisma.Decimal(participants).mul(lessonPrice);
+
+    // Prevent overbooking based on lesson capacity
     if (lesson.capacity !== null && lesson.capacity !== undefined) {
       const overlap = await prisma.booking.aggregate({
         where: {
@@ -196,19 +227,98 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const booking = await prisma.booking.create({
-      data: {
-        businessId,
-        customerId,
-        lessonId,
-        startAt,
-        endAt: finalEnd,
-        participants,
-        ...(status ? { status } : {}),
-      },
-    });
+    try {
+      const booking = await prisma.$transaction(async (tx) => {
+        // Validate equipment availability for each allocation
+        for (const alloc of equipmentAllocations) {
+          const variant = await tx.equipmentVariant.findFirst({
+            where: { id: alloc.equipmentVariantId, businessId },
+            select: { totalQuantity: true },
+          });
+          if (!variant) throw new Error("variant_not_found");
 
-    return NextResponse.json({ data: booking }, { status: 201 });
+          const [rentalOverlap, allocOverlap] = await Promise.all([
+            tx.rental.aggregate({
+              where: {
+                businessId,
+                equipmentVariantId: alloc.equipmentVariantId,
+                status: { in: ["ACTIVE", "OVERDUE"] },
+                startAt: { lt: finalEnd },
+                endAt: { gt: startAt },
+              },
+              _sum: { quantity: true },
+            }),
+            tx.bookingEquipmentAllocation.aggregate({
+              where: {
+                equipmentVariantId: alloc.equipmentVariantId,
+                booking: {
+                  businessId,
+                  status: { in: ["BOOKED", "CHECKED_IN"] },
+                  startAt: { lt: finalEnd },
+                  endAt: { gt: startAt },
+                },
+              },
+              _sum: { quantity: true },
+            }),
+          ]);
+          const inUse = (rentalOverlap._sum.quantity ?? 0) + (allocOverlap._sum.quantity ?? 0);
+          const available = variant.totalQuantity - inUse;
+          if (available < alloc.quantity) {
+            throw new Error("insufficient_equipment");
+          }
+        }
+
+        const created = await tx.booking.create({
+          data: {
+            businessId,
+            customerId,
+            lessonId,
+            startAt,
+            endAt: finalEnd,
+            participants,
+            ...(status ? { status } : {}),
+          },
+        });
+
+        for (const alloc of equipmentAllocations) {
+          await tx.bookingEquipmentAllocation.create({
+            data: {
+              bookingId: created.id,
+              equipmentVariantId: alloc.equipmentVariantId,
+              quantity: alloc.quantity,
+            },
+          });
+        }
+
+        await tx.payment.create({
+          data: {
+            businessId,
+            bookingId: created.id,
+            amount,
+            method,
+          },
+        });
+
+        return created;
+      });
+
+      return NextResponse.json({ data: booking }, { status: 201 });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "variant_not_found") {
+        return NextResponse.json(
+          { error: "One or more equipment variants not found." },
+          { status: 400 },
+        );
+      }
+      if (msg === "insufficient_equipment") {
+        return NextResponse.json(
+          { error: "Not enough equipment available for this time window. Try different sizes or times." },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
   }
 
   if (!endAt || Number.isNaN(endAt.getTime())) {

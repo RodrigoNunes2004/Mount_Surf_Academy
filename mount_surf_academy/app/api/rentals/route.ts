@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { EquipmentStatus, RentalStatus } from "@prisma/client";
+import { EquipmentStatus, PaymentMethod, RentalStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../_lib/tenant";
 
 const RENTAL_STATUSES = Object.values(RentalStatus);
+const PAYMENT_METHODS = Object.values(PaymentMethod);
 
 export async function GET(req: NextRequest) {
   const businessId = await resolveBusinessId(req);
@@ -69,6 +71,7 @@ export async function POST(req: NextRequest) {
   const b = body as Record<string, unknown>;
   const customerId = typeof b.customerId === "string" ? b.customerId.trim() : "";
   const equipmentId = typeof b.equipmentId === "string" ? b.equipmentId.trim() : "";
+  const equipmentVariantId = typeof b.equipmentVariantId === "string" ? b.equipmentVariantId.trim() : "";
 
   const startAt =
     typeof b.startAt === "string" && b.startAt.trim()
@@ -83,6 +86,27 @@ export async function POST(req: NextRequest) {
         ? b.endAt
         : null;
 
+  const quantity =
+    typeof b.quantity === "number" && Number.isFinite(b.quantity)
+      ? Math.max(1, Math.trunc(b.quantity))
+      : typeof b.quantity === "string"
+        ? Math.max(1, Math.trunc(Number(b.quantity)) || 1)
+        : 1;
+
+  const priceTotalRaw = b.priceTotal;
+  const priceTotal =
+    typeof priceTotalRaw === "number" && Number.isFinite(priceTotalRaw) && priceTotalRaw >= 0
+      ? new Prisma.Decimal(priceTotalRaw)
+      : typeof priceTotalRaw === "string" && priceTotalRaw.trim()
+        ? new Prisma.Decimal(priceTotalRaw)
+        : null;
+
+  const methodRaw = typeof b.method === "string" ? b.method.trim() : "";
+  const method =
+    methodRaw && PAYMENT_METHODS.includes(methodRaw as PaymentMethod)
+      ? (methodRaw as PaymentMethod)
+      : null;
+
   const statusRaw = typeof b.status === "string" ? b.status.trim() : null;
   const status =
     statusRaw && RENTAL_STATUSES.includes(statusRaw as RentalStatus)
@@ -92,8 +116,11 @@ export async function POST(req: NextRequest) {
   if (!customerId) {
     return NextResponse.json({ error: "customerId is required." }, { status: 400 });
   }
-  if (!equipmentId) {
-    return NextResponse.json({ error: "equipmentId is required." }, { status: 400 });
+  if (!equipmentId && !equipmentVariantId) {
+    return NextResponse.json(
+      { error: "equipmentId or equipmentVariantId is required." },
+      { status: 400 },
+    );
   }
   if (!startAt || Number.isNaN(startAt.getTime())) {
     return NextResponse.json({ error: "startAt is required and must be a date." }, { status: 400 });
@@ -129,7 +156,104 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  void now;
+
+  const activeStatuses = [RentalStatus.ACTIVE, RentalStatus.OVERDUE].filter(Boolean) as RentalStatus[];
+
+  if (equipmentVariantId) {
+    if (!priceTotal || priceTotal.lte(0)) {
+      return NextResponse.json(
+        { error: "priceTotal is required and must be positive for variant rentals." },
+        { status: 400 },
+      );
+    }
+    if (!method) {
+      return NextResponse.json(
+        { error: "method is required (CASH, CARD, TRANSFER, ONLINE)." },
+        { status: 400 },
+      );
+    }
+
+    try {
+      const rental = await prisma.$transaction(async (tx) => {
+        const variant = await tx.equipmentVariant.findFirst({
+          where: { id: equipmentVariantId, businessId },
+          select: { id: true, totalQuantity: true },
+        });
+        if (!variant) throw new Error("variant_not_found");
+
+        const [rentalOverlap, allocationOverlap] = await Promise.all([
+          tx.rental.aggregate({
+            where: {
+              businessId,
+              equipmentVariantId,
+              status: { in: activeStatuses },
+              startAt: { lt: endAt },
+              endAt: { gt: startAt },
+            },
+            _sum: { quantity: true },
+          }),
+          tx.bookingEquipmentAllocation.aggregate({
+            where: {
+              equipmentVariantId,
+              booking: {
+                businessId,
+                status: { in: ["BOOKED", "CHECKED_IN"] },
+                startAt: { lt: endAt },
+                endAt: { gt: startAt },
+              },
+            },
+            _sum: { quantity: true },
+          }),
+        ]);
+        const inUse = (rentalOverlap._sum.quantity ?? 0) + (allocationOverlap._sum.quantity ?? 0);
+        const available = variant.totalQuantity - inUse;
+        if (available < quantity) {
+          throw new Error("insufficient_availability");
+        }
+
+        const created = await tx.rental.create({
+          data: {
+            businessId,
+            customerId,
+            equipmentVariantId,
+            quantity,
+            startAt,
+            endAt,
+            priceTotal,
+            status: RentalStatus.ACTIVE,
+          },
+        });
+
+        await tx.payment.create({
+          data: {
+            businessId,
+            rentalId: created.id,
+            amount: priceTotal,
+            method,
+          },
+        });
+
+        return created;
+      });
+
+      return NextResponse.json({ data: rental }, { status: 201 });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "variant_not_found") {
+        return NextResponse.json(
+          { error: "equipmentVariantId not found for this business." },
+          { status: 400 },
+        );
+      }
+      if (msg === "insufficient_availability") {
+        return NextResponse.json(
+          { error: "Not enough equipment available for this time window." },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
+  }
 
   let rental;
   try {

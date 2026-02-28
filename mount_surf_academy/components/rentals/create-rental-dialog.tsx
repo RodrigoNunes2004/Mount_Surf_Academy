@@ -25,8 +25,20 @@ import {
 import { cn } from "@/lib/utils";
 import { Check, ChevronsUpDown } from "lucide-react";
 
-type CustomerOption = { id: string; firstName: string; lastName: string; phone: string | null; email: string | null };
-type EquipmentOption = { id: string; category: string; size: string | null; description: string | null };
+type CustomerOption = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+};
+type CategoryOption = { id: string; name: string };
+type VariantOption = {
+  id: string;
+  label: string;
+  categoryId: string;
+  category: { name: string };
+};
 
 function toDateTimeLocalValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -37,12 +49,21 @@ function addMinutes(d: Date, minutes: number) {
   return new Date(d.getTime() + minutes * 60_000);
 }
 
+const PAYMENT_METHODS = [
+  { value: "CASH", label: "Cash" },
+  { value: "CARD", label: "Card" },
+  { value: "TRANSFER", label: "Transfer" },
+  { value: "ONLINE", label: "Online" },
+] as const;
+
 export function CreateRentalDialog({
   customers,
-  equipment,
+  categories,
+  variants,
 }: {
   customers: CustomerOption[];
-  equipment: EquipmentOption[];
+  categories: CategoryOption[];
+  variants: VariantOption[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -51,9 +72,13 @@ export function CreateRentalDialog({
 
   const now = useMemo(() => new Date(), []);
   const [customerId, setCustomerId] = useState("");
-  const [equipmentId, setEquipmentId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [variantId, setVariantId] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [priceTotal, setPriceTotal] = useState("");
+  const [method, setMethod] = useState<"CASH" | "CARD" | "TRANSFER" | "ONLINE">("CASH");
   const [customerOpen, setCustomerOpen] = useState(false);
-  const [equipmentOpen, setEquipmentOpen] = useState(false);
+  const [variantOpen, setVariantOpen] = useState(false);
   const [startAt, setStartAt] = useState(toDateTimeLocalValue(now));
   const [endAt, setEndAt] = useState(toDateTimeLocalValue(addMinutes(now, 60)));
 
@@ -61,9 +86,13 @@ export function CreateRentalDialog({
     () => customers.find((c) => c.id === customerId) ?? null,
     [customers, customerId],
   );
-  const selectedEquipment = useMemo(
-    () => equipment.find((e) => e.id === equipmentId) ?? null,
-    [equipment, equipmentId],
+  const variantsForCategory = useMemo(
+    () => variants.filter((v) => v.categoryId === categoryId),
+    [variants, categoryId],
+  );
+  const selectedVariant = useMemo(
+    () => variants.find((v) => v.id === variantId) ?? null,
+    [variants, variantId],
   );
 
   async function onSubmit(e: React.FormEvent) {
@@ -76,12 +105,14 @@ export function CreateRentalDialog({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         customerId,
-        equipmentId,
+        equipmentVariantId: variantId,
+        quantity: Math.max(1, Math.trunc(Number(quantity)) || 1),
+        priceTotal: Number(priceTotal) || 0,
+        method,
         startAt: new Date(startAt).toISOString(),
         endAt: new Date(endAt).toISOString(),
       }),
     });
-
     setLoading(false);
 
     if (!res.ok) {
@@ -92,7 +123,11 @@ export function CreateRentalDialog({
 
     setOpen(false);
     setCustomerId("");
-    setEquipmentId("");
+    setCategoryId("");
+    setVariantId("");
+    setQuantity("1");
+    setPriceTotal("");
+    setMethod("CASH");
     router.refresh();
   }
 
@@ -107,11 +142,12 @@ export function CreateRentalDialog({
       <DialogTrigger asChild>
         <Button>Add rental</Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New rental</DialogTitle>
           <DialogDescription>
-            Create a rental. Equipment must be available.
+            Create a rental with immediate payment. Equipment availability is
+            checked for the selected time window.
           </DialogDescription>
         </DialogHeader>
 
@@ -131,7 +167,6 @@ export function CreateRentalDialog({
                     <span className="truncate">
                       {selectedCustomer.firstName} {selectedCustomer.lastName}
                       {selectedCustomer.phone ? ` • ${selectedCustomer.phone}` : ""}
-                      {selectedCustomer.email ? ` • ${selectedCustomer.email}` : ""}
                     </span>
                   ) : (
                     <span className="text-muted-foreground">
@@ -150,7 +185,7 @@ export function CreateRentalDialog({
                       {customers.map((c) => {
                         const label = `${c.firstName} ${c.lastName}${
                           c.phone ? ` • ${c.phone}` : ""
-                        }${c.email ? ` • ${c.email}` : ""}`;
+                        }`;
                         return (
                           <CommandItem
                             key={c.id}
@@ -176,31 +211,48 @@ export function CreateRentalDialog({
                 </Command>
               </PopoverContent>
             </Popover>
-            <input type="hidden" name="customerId" value={customerId} required />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="equipment">Equipment</Label>
-            <Popover open={equipmentOpen} onOpenChange={setEquipmentOpen}>
+            <Label>Equipment category</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={categoryId}
+              onChange={(e) => {
+                setCategoryId(e.target.value);
+                setVariantId("");
+              }}
+            >
+              <option value="">Select category…</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="variant">Size / variant</Label>
+            <Popover open={variantOpen} onOpenChange={setVariantOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
                   role="combobox"
-                  aria-expanded={equipmentOpen}
+                  aria-expanded={variantOpen}
                   className="h-10 w-full justify-between"
-                  id="equipment"
+                  id="variant"
+                  disabled={!categoryId}
                 >
-                  {selectedEquipment ? (
-                    <span className="truncate">
-                      {selectedEquipment.category}
-                      {selectedEquipment.size ? ` • ${selectedEquipment.size}` : ""}
-                      {selectedEquipment.description
-                        ? ` • ${selectedEquipment.description}`
-                        : ""}
+                  {selectedVariant ? (
+                    <span>
+                      {selectedVariant.category.name} {selectedVariant.label}
                     </span>
                   ) : (
                     <span className="text-muted-foreground">
-                      Type to search equipment…
+                      {categoryId
+                        ? "Select size…"
+                        : "Select category first"}
                     </span>
                   )}
                   <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
@@ -208,31 +260,29 @@ export function CreateRentalDialog({
               </PopoverTrigger>
               <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
                 <Command>
-                  <CommandInput placeholder="Search equipment..." />
+                  <CommandInput placeholder="Search size..." />
                   <CommandList>
-                    <CommandEmpty>No equipment found.</CommandEmpty>
+                    <CommandEmpty>No variant found.</CommandEmpty>
                     <CommandGroup>
-                      {equipment.map((eq) => {
-                        const label = `${eq.category}${eq.size ? ` • ${eq.size}` : ""}${
-                          eq.description ? ` • ${eq.description}` : ""
-                        }`;
+                      {variantsForCategory.map((v) => {
+                        const label = `${v.category.name} ${v.label}`;
                         return (
                           <CommandItem
-                            key={eq.id}
+                            key={v.id}
                             value={label}
                             onSelect={() => {
-                              setEquipmentId(eq.id);
-                              setEquipmentOpen(false);
+                              setVariantId(v.id);
+                              setVariantOpen(false);
                             }}
                             className="gap-2"
                           >
                             <Check
                               className={cn(
                                 "size-4",
-                                equipmentId === eq.id ? "opacity-100" : "opacity-0",
+                                variantId === v.id ? "opacity-100" : "opacity-0",
                               )}
                             />
-                            <span className="truncate">{label}</span>
+                            <span>{label}</span>
                           </CommandItem>
                         );
                       })}
@@ -241,7 +291,48 @@ export function CreateRentalDialog({
                 </Command>
               </PopoverContent>
             </Popover>
-            <input type="hidden" name="equipmentId" value={equipmentId} required />
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="quantity">Quantity</Label>
+              <Input
+                id="quantity"
+                type="number"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="priceTotal">Price (NZD)</Label>
+              <Input
+                id="priceTotal"
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="0.00"
+                value={priceTotal}
+                onChange={(e) => setPriceTotal(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Payment method</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={method}
+              onChange={(e) =>
+                setMethod(e.target.value as "CASH" | "CARD" | "TRANSFER" | "ONLINE")
+              }
+            >
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid gap-2 md:grid-cols-2">
@@ -256,7 +347,7 @@ export function CreateRentalDialog({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="endAt">End</Label>
+              <Label htmlFor="endAt">Expected end</Label>
               <Input
                 id="endAt"
                 type="datetime-local"
@@ -282,11 +373,25 @@ export function CreateRentalDialog({
           {error ? <div className="text-sm text-destructive">{error}</div> : null}
 
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={loading}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+              disabled={loading}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create rental"}
+            <Button
+              type="submit"
+              disabled={
+                loading ||
+                !customerId ||
+                !variantId ||
+                !priceTotal ||
+                Number(priceTotal) <= 0
+              }
+            >
+              {loading ? "Creating…" : "Create rental"}
             </Button>
           </div>
         </form>
@@ -294,4 +399,3 @@ export function CreateRentalDialog({
     </Dialog>
   );
 }
-

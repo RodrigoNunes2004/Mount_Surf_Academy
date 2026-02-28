@@ -79,7 +79,8 @@ export async function POST(req: NextRequest) {
     ? (methodRaw as PaymentMethod)
     : null;
 
-  const stripeId = typeof b.stripeId === "string" ? b.stripeId.trim() : null;
+  const stripePaymentIntentId = typeof b.stripePaymentIntentId === "string" ? b.stripePaymentIntentId.trim() : null;
+  const stripeSessionId = typeof b.stripeSessionId === "string" ? b.stripeSessionId.trim() : null;
 
   const bookingId = typeof b.bookingId === "string" ? b.bookingId.trim() : null;
   const rentalId = typeof b.rentalId === "string" ? b.rentalId.trim() : null;
@@ -137,7 +138,8 @@ export async function POST(req: NextRequest) {
       businessId,
       amount,
       method,
-      stripeId,
+      ...(stripePaymentIntentId ? { stripePaymentIntentId } : {}),
+      ...(stripeSessionId ? { stripeSessionId } : {}),
       bookingId: bookingId || null,
       rentalId: rentalId || null,
     },

@@ -39,6 +39,7 @@ type RentalRow = {
   customerId: string;
   equipmentId: string | null;
   equipmentCategoryId: string | null;
+  equipmentVariantId: string | null;
   quantity: number;
   startAt: Date;
   endAt: Date;
@@ -48,10 +49,17 @@ type RentalRow = {
 type CustomerMini = { id: string; firstName: string; lastName: string };
 type EquipmentMini = { id: string; category: string; size: string | null };
 type CategoryMini = { id: string; name: string };
+type VariantMini = {
+  id: string;
+  label: string;
+  categoryId: string;
+  category: { name: string };
+};
 
 type PrismaHack = typeof prisma & {
   rental: { findMany: (args: unknown) => Promise<RentalRow[]> };
   equipmentCategory: { findMany: (args: unknown) => Promise<CategoryMini[]> };
+  equipmentVariant: { findMany: (args: unknown) => Promise<VariantMini[]> };
 };
 
 export default async function RentalsPage({
@@ -83,7 +91,7 @@ export default async function RentalsPage({
   const customerWhere = { businessId } as Record<string, unknown>;
   customerWhere.archivedAt = null;
 
-  const [customers, equipment, rentals] = await Promise.all([
+  const [customers, equipment, categories, variants, rentals] = await Promise.all([
     prisma.customer.findMany({
       where: customerWhere as never,
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -102,6 +110,16 @@ export default async function RentalsPage({
       take: 200,
       select: { id: true, category: true, size: true, description: true },
     }),
+    prismaHack.equipmentCategory.findMany({
+      where: { businessId },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prismaHack.equipmentVariant.findMany({
+      where: { businessId },
+      orderBy: [{ category: { name: "asc" } }, { label: "asc" }],
+      select: { id: true, label: true, categoryId: true, category: { select: { name: true } } },
+    }),
     // Cast is intentional to avoid stale editor Prisma types.
     // Runtime and Next build use the generated client correctly.
     prismaHack.rental.findMany({
@@ -113,6 +131,7 @@ export default async function RentalsPage({
         customerId: true,
         equipmentId: true,
         equipmentCategoryId: true,
+        equipmentVariantId: true,
         quantity: true,
         startAt: true,
         endAt: true,
@@ -130,8 +149,13 @@ export default async function RentalsPage({
       rentals.map((r) => r.equipmentCategoryId).filter(Boolean) as string[],
     ),
   );
+  const variantIds = Array.from(
+    new Set(
+      rentals.map((r) => r.equipmentVariantId).filter(Boolean) as string[],
+    ),
+  );
 
-  const [rentalCustomers, rentalEquipment, rentalCategories] = await Promise.all([
+  const [rentalCustomers, rentalEquipment, rentalCategories, rentalVariants] = await Promise.all([
     prisma.customer.findMany({
       where: { businessId, id: { in: customerIds } },
       select: { id: true, firstName: true, lastName: true },
@@ -148,6 +172,12 @@ export default async function RentalsPage({
           select: { id: true, name: true },
         })
       : Promise.resolve([]),
+    variantIds.length
+      ? prismaHack.equipmentVariant.findMany({
+          where: { businessId, id: { in: variantIds } },
+          select: { id: true, label: true, categoryId: true, category: { select: { name: true } } },
+        })
+      : Promise.resolve([]),
   ]);
 
   const customerById = new Map<string, CustomerMini>(
@@ -158,6 +188,9 @@ export default async function RentalsPage({
   );
   const categoryById = new Map<string, CategoryMini>(
     (rentalCategories as CategoryMini[]).map((c) => [c.id, c]),
+  );
+  const variantById = new Map<string, VariantMini>(
+    (rentalVariants as VariantMini[]).map((v) => [v.id, v]),
   );
 
   const now = new Date();
@@ -171,7 +204,11 @@ export default async function RentalsPage({
             Create rentals, return equipment, and keep an audit trail.
           </div>
         </div>
-        <CreateRentalDialog customers={customers} equipment={equipment} />
+        <CreateRentalDialog
+          customers={customers}
+          categories={categories as CategoryMini[]}
+          variants={variants as VariantMini[]}
+        />
       </div>
 
       <Card>
@@ -218,6 +255,14 @@ export default async function RentalsPage({
                   const cat = r.equipmentCategoryId
                     ? categoryById.get(r.equipmentCategoryId)
                     : null;
+                  const v = r.equipmentVariantId
+                    ? variantById.get(r.equipmentVariantId)
+                    : null;
+
+                  const equipmentLabel = v
+                    ? `${v.category.name} ${v.label}`
+                    : cat?.name ?? eq?.category ?? "—";
+                  const sizeLabel = !v && eq?.size ? ` • ${eq.size}` : "";
 
                   return (
                     <TableRow key={r.id}>
@@ -225,8 +270,8 @@ export default async function RentalsPage({
                         {c ? `${c.firstName} ${c.lastName}` : "—"}
                       </TableCell>
                       <TableCell>
-                        {cat?.name ?? eq?.category ?? "—"}
-                        {eq?.size ? ` • ${eq.size}` : ""}
+                        {equipmentLabel}
+                        {sizeLabel}
                         {typeof r.quantity === "number" ? ` • x${r.quantity}` : ""}
                       </TableCell>
                       <TableCell>{new Date(r.startAt).toLocaleString()}</TableCell>

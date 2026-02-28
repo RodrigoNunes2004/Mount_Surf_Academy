@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookingStatus, RentalStatus } from "@prisma/client";
+import { BookingStatus, PaymentStatus, RentalStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/server/session";
 
@@ -32,7 +32,11 @@ export default async function DashboardPage() {
       },
     }),
     prisma.payment.aggregate({
-      where: { businessId, createdAt: { gte: startOfDay, lte: endOfDay } },
+      where: {
+        businessId,
+        status: PaymentStatus.PAID,
+        paidAt: { gte: startOfDay, lte: endOfDay },
+      },
       _sum: { amount: true },
     }),
     prisma.equipment.count({ where: { businessId, status: "RENTED" } }),
