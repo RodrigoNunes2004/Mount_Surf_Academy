@@ -52,6 +52,7 @@ function addMinutes(d: Date, minutes: number) {
 const PAYMENT_METHODS = [
   { value: "CASH", label: "Cash" },
   { value: "CARD", label: "Card" },
+  { value: "EFTPOS", label: "EFTPOS" },
   { value: "TRANSFER", label: "Transfer" },
   { value: "ONLINE", label: "Online" },
 ] as const;
@@ -76,7 +77,7 @@ export function CreateRentalDialog({
   const [variantId, setVariantId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [priceTotal, setPriceTotal] = useState("");
-  const [method, setMethod] = useState<"CASH" | "CARD" | "TRANSFER" | "ONLINE">("CASH");
+  const [method, setMethod] = useState<"CASH" | "EFTPOS" | "CARD" | "TRANSFER" | "ONLINE">("CASH");
   const [customerOpen, setCustomerOpen] = useState(false);
   const [variantOpen, setVariantOpen] = useState(false);
   const [startAt, setStartAt] = useState(toDateTimeLocalValue(now));
@@ -324,7 +325,7 @@ export function CreateRentalDialog({
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={method}
               onChange={(e) =>
-                setMethod(e.target.value as "CASH" | "CARD" | "TRANSFER" | "ONLINE")
+                setMethod(e.target.value as "CASH" | "EFTPOS" | "CARD" | "TRANSFER" | "ONLINE")
               }
             >
               {PAYMENT_METHODS.map((m) => (

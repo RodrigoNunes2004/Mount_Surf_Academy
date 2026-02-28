@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveBusinessId } from "../_lib/tenant";
 
@@ -18,9 +19,12 @@ export async function GET(req: NextRequest) {
   const take = Math.min(Math.max(Number(takeRaw ?? 50) || 50, 1), 200);
   const skip = Math.max(Number(skipRaw ?? 0) || 0, 0);
 
+  const activeOnly = searchParams.get("active") === "true";
+
   const instructors = await prisma.instructor.findMany({
     where: {
       businessId,
+      ...(activeOnly ? { isActive: true } : {}),
       ...(q
         ? {
             OR: [
@@ -65,6 +69,15 @@ export async function POST(req: NextRequest) {
   const lastName = typeof b.lastName === "string" ? b.lastName.trim() : "";
   const phone = typeof b.phone === "string" ? b.phone.trim() : null;
   const email = typeof b.email === "string" ? b.email.trim() : null;
+  const isActive = typeof b.isActive === "boolean" ? b.isActive : true;
+
+  let hourlyRate: Prisma.Decimal | undefined;
+  if (typeof b.hourlyRate === "number" && b.hourlyRate >= 0) {
+    hourlyRate = new Prisma.Decimal(b.hourlyRate);
+  } else if (typeof b.hourlyRate === "string" && b.hourlyRate.trim()) {
+    const n = Number(b.hourlyRate);
+    if (Number.isFinite(n) && n >= 0) hourlyRate = new Prisma.Decimal(n);
+  }
 
   if (!firstName || !lastName) {
     return NextResponse.json(
@@ -80,6 +93,8 @@ export async function POST(req: NextRequest) {
       lastName,
       phone,
       email,
+      ...(hourlyRate !== undefined && { hourlyRate }),
+      isActive,
     },
   });
 

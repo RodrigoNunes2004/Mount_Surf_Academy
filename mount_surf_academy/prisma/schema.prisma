@@ -7,22 +7,31 @@ datasource db {
 }
 
 model Business {
-  id          String      @id @default(cuid())
-  name        String
-  location    String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  location     String?
+  contactEmail String?
+  phone        String?
+  address      String?
+  timezone           String?         @default("Pacific/Auckland")
+  currency           String?         @default("NZD")
+  logoUrl            String?
+  defaultPaymentMethod PaymentMethod? @default(CASH)
 
-  users       User[]
-  customers   Customer[]
-  instructors Instructor[]
-  equipment   Equipment[]
-  equipmentCategories   EquipmentCategory[]
-  equipmentVariants     EquipmentVariant[]
-  lessons     Lesson[]
-  bookings    Booking[]
-  rentals     Rental[]
-  payments    Payment[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  users        User[]
+  customers    Customer[]
+  instructors  Instructor[]
+  equipment    Equipment[]
+  equipmentCategories  EquipmentCategory[]
+  equipmentVariants    EquipmentVariant[]
+  lessons      Lesson[]
+  bookings     Booking[]
+  rentals      Rental[]
+  payments     Payment[]
+  integrations Integration[]
 }
 
 model User {
@@ -73,8 +82,11 @@ model Instructor {
   lastName   String
   phone      String?
   email      String?
+  hourlyRate Decimal?  @db.Decimal(10,2)
+  isActive   Boolean   @default(true)
 
   lessons    Lesson[]
+  bookings   Booking[]
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -130,14 +142,18 @@ model Booking {
   customer    Customer  @relation(fields: [customerId], references: [id])
   customerId  String
 
+  instructor  Instructor? @relation(fields: [instructorId], references: [id])
+  instructorId String?
+
   lesson      Lesson?   @relation(fields: [lessonId], references: [id])
   lessonId    String?
   rental      Rental?
 
   startAt     DateTime
   endAt       DateTime
-  participants Int @default(1)
-  status      BookingStatus @default(BOOKED)
+  participants       Int @default(1)
+  status             BookingStatus @default(BOOKED)
+  externalReference  String?  // FareHarbor/Stripe booking ID
 
   equipmentAllocations BookingEquipmentAllocation[]
 
@@ -255,34 +271,67 @@ enum RentalStatus {
 }
 
 model Payment {
-  id          String    @id @default(cuid())
-  business    Business  @relation(fields: [businessId], references: [id])
+  id                 String         @id @default(cuid())
+  business           Business       @relation(fields: [businessId], references: [id])
+  businessId         String
+
+  booking            Booking?      @relation(fields: [bookingId], references: [id])
+  bookingId          String?
+
+  rental             Rental?       @relation("RentalPayment", fields: [rentalId], references: [id])
+  rentalId           String?       @unique
+
+  amount             Decimal        @db.Decimal(10,2)
+  currency           String         @default("NZD")
+  method             PaymentMethod
+  provider           PaymentProvider @default(MANUAL)
+  status             PaymentStatus  @default(PAID)
+  externalReference  String?
+  paidAt             DateTime      @default(now())
+  stripePaymentIntentId String?
+  stripeSessionId    String?
+
+  createdAt          DateTime      @default(now())
+}
+
+model Integration {
+  id          String   @id @default(cuid())
+  business    Business @relation(fields: [businessId], references: [id])
   businessId  String
 
-  booking     Booking?  @relation(fields: [bookingId], references: [id])
-  bookingId   String?
+  provider    IntegrationProvider
+  config      String?  // JSON, encrypted at app layer
+  isActive    Boolean  @default(false)
+  lastSyncAt  DateTime?
 
-  rental      Rental?   @relation("RentalPayment", fields: [rentalId], references: [id])
-  rentalId    String?   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  amount      Decimal   @db.Decimal(10,2)
-  method      PaymentMethod
-  status      PaymentStatus @default(PAID)
-  paidAt      DateTime  @default(now())
-  stripePaymentIntentId String?
-  stripeSessionId      String?
-
-  createdAt   DateTime  @default(now())
+  @@unique([businessId, provider])
 }
 
 enum PaymentMethod {
   CASH
+  EFTPOS
   CARD
-  TRANSFER
+  TRANSFER  // Legacy, prefer EFTPOS/CARD
   ONLINE
 }
 
+enum PaymentProvider {
+  MANUAL
+  FAREHARBOR
+  STRIPE
+}
+
 enum PaymentStatus {
+  PENDING
   PAID
   REFUNDED
+  FAILED
+}
+
+enum IntegrationProvider {
+  FAREHARBOR
+  STRIPE
 }

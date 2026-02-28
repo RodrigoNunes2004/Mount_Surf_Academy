@@ -55,6 +55,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (b.phone === null) data.phone = null;
   if (typeof b.email === "string") data.email = b.email.trim();
   if (b.email === null) data.email = null;
+  if (typeof b.isActive === "boolean") data.isActive = b.isActive;
+
+  if (typeof b.hourlyRate === "number" && b.hourlyRate >= 0) {
+    data.hourlyRate = b.hourlyRate;
+  } else if (typeof b.hourlyRate === "string" && b.hourlyRate.trim()) {
+    const n = Number(b.hourlyRate);
+    if (Number.isFinite(n) && n >= 0) data.hourlyRate = n;
+  } else if (b.hourlyRate === null) {
+    data.hourlyRate = null;
+  }
 
   if ("firstName" in data && !(data.firstName as string)) {
     return NextResponse.json({ error: "firstName cannot be empty." }, { status: 400 });

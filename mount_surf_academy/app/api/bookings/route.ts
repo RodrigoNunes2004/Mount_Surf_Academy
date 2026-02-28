@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
   const b = body as Record<string, unknown>;
   const customerId = typeof b.customerId === "string" ? b.customerId.trim() : "";
   const lessonId = typeof b.lessonId === "string" ? b.lessonId.trim() : null;
+  const instructorId = typeof b.instructorId === "string" ? b.instructorId.trim() : null;
 
   const startAt =
     typeof b.startAt === "string" && b.startAt.trim()
@@ -148,6 +149,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (lessonId) {
+    if (!instructorId) {
+      return NextResponse.json(
+        { error: "instructorId is required for lesson bookings." },
+        { status: 400 },
+      );
+    }
+
     const lesson = await prisma.lesson.findFirst({
       where: { id: lessonId, businessId },
       select: { id: true, capacity: true, durationMinutes: true, price: true },
@@ -155,6 +163,17 @@ export async function POST(req: NextRequest) {
     if (!lesson) {
       return NextResponse.json(
         { error: "lessonId not found for this business." },
+        { status: 400 },
+      );
+    }
+
+    const instructor = await prisma.instructor.findFirst({
+      where: { id: instructorId, businessId },
+      select: { id: true },
+    });
+    if (!instructor) {
+      return NextResponse.json(
+        { error: "instructorId not found for this business." },
         { status: 400 },
       );
     }

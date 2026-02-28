@@ -78,7 +78,7 @@ export function CreateLessonBookingDialog({
   const [startAt, setStartAt] = useState(toDateTimeLocalValue(now));
   const [boardVariantId, setBoardVariantId] = useState("");
   const [wetsuitVariantId, setWetsuitVariantId] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "TRANSFER" | "ONLINE">("CASH");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "EFTPOS" | "CARD" | "ONLINE">("CASH");
 
   const [customerOpen, setCustomerOpen] = useState(false);
   const [lessonOpen, setLessonOpen] = useState(false);
@@ -345,12 +345,12 @@ export function CreateLessonBookingDialog({
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={paymentMethod}
               onChange={(e) =>
-                setPaymentMethod(e.target.value as "CASH" | "CARD" | "TRANSFER" | "ONLINE")
+                setPaymentMethod(e.target.value as "CASH" | "EFTPOS" | "CARD" | "ONLINE")
               }
             >
               <option value="CASH">Cash</option>
+              <option value="EFTPOS">EFTPOS</option>
               <option value="CARD">Card</option>
-              <option value="TRANSFER">Transfer</option>
               <option value="ONLINE">Online</option>
             </select>
           </div>
