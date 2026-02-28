@@ -161,11 +161,7 @@ export default async function BookingsPage({
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           {canCheckIn ? (
-                            <CheckInBookingDialog
-                              bookingId={b.id}
-                              defaultQuantity={b.participants}
-                              categories={categories}
-                            />
+                            <CheckInBookingDialog bookingId={b.id} />
                           ) : null}
                           {canComplete ? (
                             <CompleteBookingButton bookingId={b.id} />

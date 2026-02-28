@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -29,9 +30,16 @@ export function DashboardSidebar() {
 
   return (
     <aside className="flex h-full w-64 flex-col border-r bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center justify-between px-4 py-4">
-        <Link href="/dashboard" className="font-semibold tracking-tight">
-          Mount Surf Academy
+      <div className="flex items-center justify-between gap-2 px-4 py-4">
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <Image
+            src="/MTA_Logo.png"
+            alt="Mount Surf Academy"
+            width={48}
+            height={48}
+            className="shrink-0"
+          />
+          <span className="font-semibold tracking-tight">Mount Surf Academy</span>
         </Link>
         <Badge variant="secondary" className="text-xs">
           Internal
